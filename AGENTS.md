@@ -4,9 +4,11 @@ The project was scaffolded on SDK 57 but was rolled back to **SDK 54** because t
 
 # Beggars Map
 
-Crowdsourced map/directory of cheap eats in Bengaluru (India take on Korea's viral "Geoji Map" / 거지맵). No price cap — listings sort cheapest-first, community upvotes surface quality. See full product plan and locked decisions in Claude's memory (`project-beggars-map`) — do not re-litigate scope choices made there without the user raising it.
+Crowdsourced map/directory of cheap eats in Bengaluru (India take on Korea's viral "Geoji Map" / 거지맵). **₹100 price cap** — listings must be ₹100 or under, sort cheapest-first, community upvotes surface quality. (Decision changed 2026-08-25: originally "no cap," the user revised this to match Geoji Map's own hard cap — see full product plan and prior locked decisions in Claude's memory `project-beggars-map`, but this price-cap change supersedes what's written there.)
 
-**Known gap vs. the Korean original:** Geoji Map's viral growth ran on zero-friction browser access (open a link, no signup, no app install). BeggarsMap is currently app-only. If/when growth matters, a web-accessible version (Expo web export + a browser-compatible map, since `@maplibre/maplibre-react-native` is native-only and won't run on web) is worth prioritizing — raised with the user, not yet built.
+**Known gap vs. the Korean original — now the active plan:** Geoji Map's viral growth ran on zero-friction browser access (open a link, no signup, no app install). BeggarsMap is currently app-only. The user has decided to build a **web app first**, targeting launch by evening the day after 2026-08-25 — this is the next work session's priority, not yet started. Needs: Expo web export (or a lighter-weight web build) + a browser-compatible map (`@maplibre/maplibre-react-native` is native-only, won't run on web — options are OLA's own `olamaps-web-sdk`, or reuse the static-map-image fallback for a first cut), plus deciding on hosting for the web build.
+
+**Price cap implementation status:** not yet applied to code — currently the DB constraint (`0001_init.sql`) only enforces `price_rupees > 0` and the Add Listing form (`AddListingScreen.tsx`) only validates `> 0`. Both need a `<= 100` upper bound added (migration + client validation) before this is actually enforced anywhere.
 
 ## Stack
 - Expo (React Native) + TypeScript, SDK 54, `blank-typescript` template
