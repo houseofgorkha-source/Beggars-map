@@ -1,26 +1,47 @@
-# Expo HAS CHANGED
+# Expo SDK is pinned to 54 — do not upgrade without asking
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+The project was scaffolded on SDK 57 but was rolled back to **SDK 54** because the Expo Go app on the Play/App Store lags behind the latest SDK (Apple review delays especially) and can't open newer-SDK projects. Bump back up only once Expo Go in the stores has caught up, or once you're fully off Expo Go and building exclusively via EAS dev-client. Read the versioned docs at https://docs.expo.dev/versions/v54.0.0/ before writing code that depends on SDK-specific APIs.
 
 # Beggars Map
 
-Crowdsourced map/directory of cheap eats in Bengaluru (India take on Korea's viral "Geojimap"). No price cap — listings sort cheapest-first, community upvotes surface quality. See full product plan and locked decisions in Claude's memory (`project-beggars-map`) — do not re-litigate scope choices made there without the user raising it.
+Crowdsourced map/directory of cheap eats in Bengaluru (India take on Korea's viral "Geoji Map" / 거지맵). No price cap — listings sort cheapest-first, community upvotes surface quality. See full product plan and locked decisions in Claude's memory (`project-beggars-map`) — do not re-litigate scope choices made there without the user raising it.
+
+**Known gap vs. the Korean original:** Geoji Map's viral growth ran on zero-friction browser access (open a link, no signup, no app install). BeggarsMap is currently app-only. If/when growth matters, a web-accessible version (Expo web export + a browser-compatible map, since `@maplibre/maplibre-react-native` is native-only and won't run on web) is worth prioritizing — raised with the user, not yet built.
 
 ## Stack
-- Expo (React Native) + TypeScript, `blank-typescript` template
-- Map: OLA Maps (India-tuned, 500K free loads/month)
-- Backend: Supabase (free tier) — Postgres schema in `supabase/migrations/0001_init.sql` (profiles, listings, reviews, votes, reports, leaderboard view). Client at `src/lib/supabase.ts`, reads `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` from env (`.env`, gitignored — see `.env.example`). RLS is on: public read, writes require `auth.uid()` to match the row owner.
-- Target: Google Play + Apple App Store, budget ~$140 total (Apple $99/yr, Google Play $25 one-time)
+- Expo (React Native) + TypeScript, SDK 54, `blank-typescript` template
+- Navigation: React Navigation (`src/navigation/`) — root stack (`Tabs`, `ListingDetail`, `AddListing`, `PickLocation`, `SignIn`) wrapping a bottom tab navigator (`Map`, `Contribute`, `Leaderboard`, `Profile`). The `Contribute` tab never renders its own screen — its `tabPress` is intercepted and redirected to `AddListing`/`SignIn` on the root stack, so it needs `Map` to stay in the tab bar as the way back (don't remove `Map` from the tab bar without restoring another path back to it).
+- Map: OLA Maps (India-tuned, dedicated key in `EXPO_PUBLIC_OLA_MAPS_API_KEY`, not shared with RentalIntel's key — see budget note below). Layers:
+  - **Interactive map** (`src/components/ListingsMap.tsx`, used on the Map screen; `src/screens/PickLocationScreen.tsx`, used for manual pin placement in Add Listing): `@maplibre/maplibre-react-native` pointed at OLA's vector tile style JSON (`vectorStyleUrl()` in `src/lib/olaMaps.ts`). **Native module — will not run in Expo Go.** Requires an EAS dev-client build, already set up (`eas.json`, EAS project linked under `nikhil_sinha/BeggarsMap`) — rebuild via `npx eas-cli build --profile development --platform android` only when a *native* dependency changes; pure JS/TS changes just need a Metro reload, no rebuild.
+  - OLA's style JSON references tile/sprite/glyph URLs that don't carry the API key themselves — `src/lib/olaMaps.ts` registers a `TransformRequestManager.addUrlSearchParam` transform at module load to append `api_key` to every request to `api.olamaps.io`. If you see 401s on sources/sprites/glyphs, this is the first thing to check.
+  - Markers use `anchor="bottom"` (pin tip points at the coordinate) — the default `"center"` anchor caused pins to visually overflow their container.
+  - **Static map fallback** (`staticMapUrl()` in `src/lib/olaMaps.ts`): plain `<Image>` hitting OLA's static-map REST endpoint, no native module needed — works in Expo Go. Superseded by the interactive map on the Map screen but kept as a lightweight-preview helper.
+  - **Places search** (`searchPlaces()` in `src/lib/olaMaps.ts`): OLA's autocomplete endpoint, used in Add Listing's "search by name" location input — response already includes `geometry.location` (lat/lng), no separate place-details call needed.
+  - No in-app turn-by-turn navigation. Listing Detail's "Directions" button hands off to the device's Google Maps / Apple Maps app instead (same pattern as Zomato/Swiggy).
+  - **Scaling risk**: if this goes viral, OLA's free tier (500K loads/month) is the first thing to break — well before Supabase's free-tier limits. Upgrading is just a paid-plan flip, no code change, but budget for it if growth is real.
+- Auth: Supabase Auth, **Google OAuth only** (`src/lib/auth.tsx`). Phone OTP was deliberately dropped: no SMS provider configured and the user doesn't want phone billing. Don't reintroduce phone auth without asking.
+  - Supabase client (`src/lib/supabase.ts`) must set `flowType: 'pkce'` explicitly — the supabase-js default is `'implicit'`, which breaks the `exchangeCodeForSession` call in `auth.tsx`.
+  - On Android, `WebBrowser.openAuthSessionAsync` sometimes resolves `dismiss` instead of `success` when the OAuth redirect hits the app's custom scheme (the OS hands the deep link straight to the app, closing the browser as a side effect). `signInWithGoogle` in `auth.tsx` races the `WebBrowser` promise against a `Linking` `'url'` event listener to catch this case — don't simplify that back down to just awaiting `openAuthSessionAsync`.
+  - Google Cloud OAuth client must be **"Web application"** type (not Android/iOS — those use a different, incompatible verification method), with `https://nvingzluboafxzxgxxwc.supabase.co/auth/v1/callback` as the authorized redirect URI, and Supabase's own **Redirect URLs** allowlist (Authentication → URL Configuration) must include `beggarsmap://*`.
+- Backend: Supabase (free tier) — Postgres schema in `supabase/migrations/`:
+  - `0001_init.sql` — profiles, listings, reviews, votes, reports, leaderboard view, RLS policies
+  - `0002_storage.sql` — `listing-photos` storage bucket + policies (needed for Add Listing photo upload)
+  - `0003_seed_demo_listings.sql` — 5 real Bengaluru demo listings under a synthetic seed user, for look-and-feel testing; safe to delete once real listings exist
+  - Client reads `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` from env (`.env`, gitignored — see `.env.example`). RLS is on: public read, writes require `auth.uid()` to match the row owner.
+  - The Supabase CLI is linked to this project only (`nvingzluboafxzxgxxwc` / "Beggars-map") — do not link or run migrations against other Supabase projects in this account (e.g. RentalIntel) from this repo. The link is session-local (`supabase/.temp/`, gitignored) — re-run `npx supabase link --project-ref nvingzluboafxzxgxxwc` if a fresh session needs it.
+- Target: Google Play + Apple App Store, budget ~$140 total (Apple $99/yr, Google Play $25 one-time) for store fees — separate from ongoing infra cost, which stays $0 until real traffic shows up (then it's Supabase Pro / an OLA paid tier, roughly $25–100/mo, not a redesign).
 
-## Core MVP screens
-1. Map view with search (default screen)
-2. Add Listing — drop pin, name, price, photo, short note
-3. Listing Detail — photos, reviews, worth-it votes
-4. Leaderboard — top contributors
-5. Profile — my contributions + rank only (no settings/bio)
+## Core MVP screens (all built, `src/screens/`)
+1. **Map** — full-screen interactive map (pins, live location) with a draggable Google-Maps-style bottom sheet (`src/components/BottomSheet.tsx`, custom-built with `Animated`/`PanResponder`, no extra native deps) holding the search bar + cheapest-first list. Tapping the visible map while the sheet is expanded collapses it; a flick (not just a slow drag past the midpoint) snaps the sheet based on gesture velocity.
+2. **Add Listing** — name, price, photo, note, plus four ways to set location: current-location GPS, "Pick on map" (opens `PickLocationScreen`, a fixed center-pin over a pannable map), search-by-name (OLA Places autocomplete), or paste a Google Maps link (`src/lib/googleMapsLink.ts` parses both full links and short `maps.app.goo.gl` links, resolving the redirect first).
+3. **Listing Detail** — photo, worth-it votes, reviews (comment + verdict), Directions handoff, report flow.
+4. **Leaderboard** — reads the `leaderboard` view.
+5. **Profile** — my contributions + rank only (no settings/bio).
 
 ## Conventions
-- Browsing is open with no login; Google/phone-OTP sign-in required only to post a listing or vote
+- Browsing is open with no login; Google sign-in required only to post a listing or vote
 - Every listing needs a report/block affordance (required by both app stores for UGC)
 - No submission gate on listings — keep friction near zero, quality comes from community upvotes
-- `npm install` in this repo needs `--ignore-scripts` — a user-level `.npmrc` (`allow-scripts=@anthropic-ai/claude-code`) blocks project-scoped install scripts otherwise
+- `npm install` in this repo needs `--ignore-scripts` — a user-level `.npmrc` (`allow-scripts=@anthropic-ai/claude-code`) blocks project-scoped install scripts otherwise. This also breaks `npx expo install`, `npx expo install --fix`, and EAS's auto-install-missing-package step; install the specific version directly via `npm install --ignore-scripts <pkg>@<version>` (check `node_modules/expo/bundledNativeModules.json` for the version this SDK expects), then re-run the command that wanted it.
+- After any change, verify with `npx tsc --noEmit` and `npx expo export --platform android` (then `rm -rf dist`) before calling it done — this catches native-module/bundling breakage that a typecheck alone won't.
+- The user's dev phone (Android) can't reach this PC over their normal Wi-Fi/hotspot setup (a known Android hotspot NAT quirk blocks the host phone from reaching its own hotspot clients) — `npx expo start --tunnel` is the reliable way to connect the dev-client to Metro, not a plain LAN `npx expo start`.
