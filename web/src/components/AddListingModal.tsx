@@ -176,6 +176,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
             onChange={(e) => setPrice(e.target.value)}
             placeholder="30"
             type="number"
+            min={1}
             max={100}
           />
 

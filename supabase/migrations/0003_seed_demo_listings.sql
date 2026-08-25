@@ -15,7 +15,7 @@ begin
 
   insert into public.listings (created_by, name, note, price_rupees, latitude, longitude, city)
   values
-    (seed_user_id, 'Shivaji Military Hotel', 'Legendary mutton biryani, been around since 1978. Go early, it sells out.', 180, 12.9634, 77.5855, 'Bengaluru'),
+    (seed_user_id, 'Shivaji Military Hotel', 'Legendary mutton biryani, been around since 1978. Go early, it sells out.', 100, 12.9634, 77.5855, 'Bengaluru'),
     (seed_user_id, 'CTR (Central Tiffin Room)', 'The benne masala dosa. Malleswaram institution, expect a queue.', 70, 13.0068, 77.5730, 'Bengaluru'),
     (seed_user_id, 'Vidyarthi Bhavan', 'Iconic Basavanagudi dosa joint, packed on weekends.', 60, 12.9422, 77.5709, 'Bengaluru'),
     (seed_user_id, 'Thindi Beedi street stalls', 'Chaat and juice stalls near KR Market, cheap and fast.', 40, 12.9634, 77.5794, 'Bengaluru'),

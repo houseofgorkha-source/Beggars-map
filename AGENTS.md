@@ -8,7 +8,7 @@ Crowdsourced map/directory of cheap eats in Bengaluru (India take on Korea's vir
 
 **Known gap vs. the Korean original — now the active plan:** Geoji Map's viral growth ran on zero-friction browser access (open a link, no signup, no app install). BeggarsMap is currently app-only. The user has decided to build a **web app first**, targeting launch by evening the day after 2026-08-25 — this is the next work session's priority, not yet started. Needs: Expo web export (or a lighter-weight web build) + a browser-compatible map (`@maplibre/maplibre-react-native` is native-only, won't run on web — options are OLA's own `olamaps-web-sdk`, or reuse the static-map-image fallback for a first cut), plus deciding on hosting for the web build.
 
-**Price cap implementation status:** not yet applied to code — currently the DB constraint (`0001_init.sql`) only enforces `price_rupees > 0` and the Add Listing form (`AddListingScreen.tsx`) only validates `> 0`. Both need a `<= 100` upper bound added (migration + client validation) before this is actually enforced anywhere.
+**Price cap implementation status:** enforced end-to-end — DB constraint via `0004_price_cap.sql` (`price_rupees > 0 and price_rupees <= 100`), plus client-side validation in both `AddListingScreen.tsx` (mobile) and `AddListingModal.tsx` (web). The `0003_seed_demo_listings.sql` seed data was also brought under the cap (one demo listing was ₹180) since it runs before `0004` and would otherwise break that migration on a fresh `supabase db reset`. If `0004`/`0005` haven't been pushed to the live Supabase project yet, run `npx supabase link --project-ref nvingzluboafxzxgxxwc` then `npx supabase db push`.
 
 ## Stack
 - Expo (React Native) + TypeScript, SDK 54, `blank-typescript` template

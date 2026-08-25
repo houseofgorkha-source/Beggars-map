@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { transformRequest, vectorStyleUrl } from '../lib/olaMaps';
@@ -12,16 +12,36 @@ type Props = {
   pickMode?: boolean;
   pickedCenter?: [number, number];
   onPickedCenterChange?: (center: [number, number]) => void;
+  showLocate?: boolean;
 };
 
-export default function MapView({ listings, onSelectListing, pickMode, pickedCenter, onPickedCenterChange }: Props) {
+export default function MapView({
+  listings,
+  onSelectListing,
+  pickMode,
+  pickedCenter,
+  onPickedCenterChange,
+  showLocate,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  const [mapLoading, setMapLoading] = useState(true);
+  const [mapError, setMapError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
+
+  const styleUrl = vectorStyleUrl();
 
   useEffect(() => {
-    const styleUrl = vectorStyleUrl();
     if (!containerRef.current || !styleUrl) return;
+
+    setMapLoading(true);
+    setMapError(false);
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -31,6 +51,11 @@ export default function MapView({ listings, onSelectListing, pickMode, pickedCen
       transformRequest,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    map.once('load', () => setMapLoading(false));
+    map.on('error', () => {
+      setMapLoading(false);
+      setMapError(true);
+    });
     mapRef.current = map;
 
     if (pickMode) {
@@ -52,9 +77,10 @@ export default function MapView({ listings, onSelectListing, pickMode, pickedCen
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
+      userMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [styleUrl, retryKey]);
 
   // Keep markers in sync with listings (browse mode only).
   useEffect(() => {
@@ -86,5 +112,92 @@ export default function MapView({ listings, onSelectListing, pickMode, pickedCen
     }
   }, [listings, pickMode, onSelectListing]);
 
-  return <div ref={containerRef} className="map-container" />;
+  const locateMe = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!navigator.geolocation) {
+      setLocateError("Your browser doesn't support location.");
+      return;
+    }
+
+    setLocating(true);
+    setLocateError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setLocating(false);
+
+        if (!userMarkerRef.current) {
+          const el = document.createElement('div');
+          el.className = 'user-location-dot';
+          userMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([longitude, latitude]).addTo(map);
+        } else {
+          userMarkerRef.current.setLngLat([longitude, latitude]);
+        }
+
+        map.flyTo({ center: [longitude, latitude], zoom: 14, duration: 800 });
+      },
+      (err) => {
+        setLocating(false);
+        setLocateError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location access denied. Allow it in your browser settings to use this.'
+            : "Couldn't get your location. Try again."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }, []);
+
+  if (!styleUrl) {
+    return (
+      <div className="map-container map-message-state">
+        <p>Map unavailable — missing OLA Maps API key.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="map-container-wrap">
+      <div ref={containerRef} className="map-container" />
+
+      {mapLoading ? (
+        <div className="map-overlay-state">
+          <span className="spinner" aria-hidden="true" />
+        </div>
+      ) : null}
+
+      {mapError ? (
+        <div className="map-overlay-state">
+          <p>Map failed to load.</p>
+          <button
+            className="secondary-button"
+            onClick={() => {
+              setMapError(false);
+              setRetryKey((k) => k + 1);
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {showLocate && !mapLoading && !mapError ? (
+        <div className="locate-control">
+          <button
+            className="locate-button"
+            onClick={locateMe}
+            disabled={locating}
+            aria-label="Use my location"
+            title="Use my location"
+          >
+            {locating ? <span className="spinner spinner-small" aria-hidden="true" /> : '◎'}
+          </button>
+          {locateError ? <div className="locate-error">{locateError}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
