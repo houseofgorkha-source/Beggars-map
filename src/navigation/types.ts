@@ -4,6 +4,7 @@ export type RootStackParamList = {
   AddListing: { pickedLatitude?: number; pickedLongitude?: number } | undefined;
   PickLocation: { initialLatitude?: number; initialLongitude?: number };
   SignIn: undefined;
+  Legal: { tab?: 'privacy' | 'terms' } | undefined;
 };
 
 export type TabParamList = {

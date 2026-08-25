@@ -10,6 +10,7 @@ import ListingDetailScreen from '../screens/ListingDetailScreen';
 import AddListingScreen from '../screens/AddListingScreen';
 import PickLocationScreen from '../screens/PickLocationScreen';
 import SignInScreen from '../screens/SignInScreen';
+import LegalScreen from '../screens/LegalScreen';
 import { useAuth } from '../lib/auth';
 import type { RootStackParamList, TabParamList } from './types';
 
@@ -73,6 +74,11 @@ export default function RootNavigator() {
           name="SignIn"
           component={SignInScreen}
           options={{ title: 'Sign in', presentation: 'modal' }}
+        />
+        <Stack.Screen
+          name="Legal"
+          component={LegalScreen}
+          options={{ title: 'Legal', presentation: 'modal' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

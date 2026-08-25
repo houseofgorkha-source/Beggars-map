@@ -45,6 +45,9 @@ export default function ProfileScreen() {
         <Pressable style={styles.signInButton} onPress={() => navigation.navigate('SignIn')}>
           <Text style={styles.signInButtonText}>Sign in</Text>
         </Pressable>
+        <Pressable style={styles.legalButton} onPress={() => navigation.navigate('Legal')}>
+          <Text style={styles.legalButtonText}>Privacy Policy & Terms</Text>
+        </Pressable>
       </View>
     );
   }
@@ -56,6 +59,9 @@ export default function ProfileScreen() {
         <Text style={styles.rank}>{rank ? `Rank #${rank}` : 'Not ranked yet'}</Text>
         <Pressable style={styles.signOutButton} onPress={signOut}>
           <Text style={styles.signOutText}>Sign out</Text>
+        </Pressable>
+        <Pressable onPress={() => navigation.navigate('Legal')}>
+          <Text style={styles.legalLink}>Privacy Policy & Terms</Text>
         </Pressable>
       </View>
 
@@ -85,11 +91,14 @@ const styles = StyleSheet.create({
   signedOutTitle: { fontSize: 16, color: '#555', marginBottom: 16 },
   signInButton: { backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 24 },
   signInButtonText: { color: '#fff', fontWeight: '700' },
+  legalButton: { marginTop: 16 },
+  legalButtonText: { color: '#888', fontSize: 13, textDecorationLine: 'underline' },
   header: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee' },
   name: { fontSize: 20, fontWeight: '700' },
   rank: { color: '#0a7d3c', fontWeight: '600', marginTop: 4 },
   signOutButton: { marginTop: 12, alignSelf: 'flex-start' },
   signOutText: { color: '#a33' },
+  legalLink: { color: '#888', fontSize: 13, textDecorationLine: 'underline', marginTop: 10 },
   sectionTitle: { fontSize: 15, fontWeight: '700', margin: 16, marginBottom: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   empty: { color: '#888' },

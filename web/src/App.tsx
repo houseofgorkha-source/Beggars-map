@@ -4,6 +4,7 @@ import MapView from './components/MapView';
 import AddListingModal from './components/AddListingModal';
 import ListingDetailModal from './components/ListingDetailModal';
 import { StarRatingDisplay } from './components/StarRating';
+import LegalModal from './components/LegalModal';
 import type { Listing, ListingRating } from './types';
 
 type ListingWithVotes = Listing & { voteCount: number; avgRating: number | null; ratingCount: number };
@@ -14,6 +15,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [legalTab, setLegalTab] = useState<'privacy' | 'terms' | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,12 +101,19 @@ export default function App() {
         </div>
         <div className="footer-section">
           <span className="footer-heading">Contact us</span>
-          <p className="footer-placeholder">Contact details go here.</p>
+          <a className="footer-link" href="tel:+919606002439">Call +91 96060 02439</a>
+          <a className="footer-link" href="https://wa.me/919606002439" target="_blank" rel="noreferrer">WhatsApp us</a>
+        </div>
+        <div className="footer-section">
+          <span className="footer-heading">Legal</span>
+          <button className="footer-link footer-link-button" onClick={() => setLegalTab('privacy')}>Privacy Policy</button>
+          <button className="footer-link footer-link-button" onClick={() => setLegalTab('terms')}>Terms &amp; Conditions</button>
         </div>
       </footer>
 
       {showAdd ? <AddListingModal onClose={() => setShowAdd(false)} onPosted={handlePosted} /> : null}
       {selectedListingId ? <ListingDetailModal listingId={selectedListingId} onClose={() => setSelectedListingId(null)} /> : null}
+      {legalTab ? <LegalModal initialTab={legalTab} onClose={() => setLegalTab(null)} /> : null}
     </div>
   );
 }
