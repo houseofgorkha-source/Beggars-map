@@ -51,21 +51,22 @@ export default function MapView({
       transformRequest,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    let loaded = false;
+
+    // MapLibre's 'error' event fires for plenty of non-fatal things —
+    // missing sprite icons, individual tile hiccups — often before the
+    // map has even finished its initial load, so it can't reliably tell
+    // us the map actually failed. Just log errors for debugging, and
+    // decide "failed" purely by whether 'load' ever fires in time.
+    const loadTimeout = setTimeout(() => {
+      setMapLoading(false);
+      setMapError(true);
+    }, 15000);
     map.once('load', () => {
-      loaded = true;
+      clearTimeout(loadTimeout);
       setMapLoading(false);
     });
     map.on('error', (e) => {
-      // MapLibre fires 'error' for plenty of non-fatal things after a
-      // successful load (a missing sprite icon, a stray tile fetch) — only
-      // treat it as fatal if the map never finished its initial load.
-      if (loaded) {
-        console.warn('Map error after load (non-fatal):', e.error);
-        return;
-      }
-      setMapLoading(false);
-      setMapError(true);
+      console.warn('MapLibre error:', e.error);
     });
     mapRef.current = map;
 
@@ -85,6 +86,7 @@ export default function MapView({
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      clearTimeout(loadTimeout);
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
