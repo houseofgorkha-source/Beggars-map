@@ -51,8 +51,19 @@ export default function MapView({
       transformRequest,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    map.once('load', () => setMapLoading(false));
-    map.on('error', () => {
+    let loaded = false;
+    map.once('load', () => {
+      loaded = true;
+      setMapLoading(false);
+    });
+    map.on('error', (e) => {
+      // MapLibre fires 'error' for plenty of non-fatal things after a
+      // successful load (a missing sprite icon, a stray tile fetch) — only
+      // treat it as fatal if the map never finished its initial load.
+      if (loaded) {
+        console.warn('Map error after load (non-fatal):', e.error);
+        return;
+      }
       setMapLoading(false);
       setMapError(true);
     });
