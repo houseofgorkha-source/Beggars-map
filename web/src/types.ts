@@ -1,9 +1,3 @@
-export type Profile = {
-  id: string;
-  display_name: string;
-  created_at: string;
-};
-
 export type Listing = {
   id: string;
   created_by: string;
@@ -16,10 +10,6 @@ export type Listing = {
   city: string;
   is_hidden: boolean;
   created_at: string;
-};
-
-export type ListingWithVotes = Listing & {
-  vote_count: number;
 };
 
 export type Review = {
@@ -38,12 +28,4 @@ export type ListingRating = {
   listing_id: string;
   avg_rating: number;
   rating_count: number;
-};
-
-export type LeaderboardRow = {
-  user_id: string;
-  display_name: string;
-  listing_count: number;
-  review_count: number;
-  score: number;
 };

@@ -16,8 +16,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
+import { StarRatingInput, StarRatingDisplay } from '../components/StarRating';
 import type { RootStackParamList } from '../navigation/types';
-import type { Listing, Review } from '../types/database';
+import type { Listing, ListingRating, Review } from '../types/database';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ListingRoute = RouteProp<RootStackParamList, 'ListingDetail'>;
@@ -30,10 +31,15 @@ export default function ListingDetailScreen() {
   const { session } = useAuth();
 
   const [listing, setListing] = useState<Listing | null>(null);
+  const [rating, setRating] = useState<ListingRating | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [voteCount, setVoteCount] = useState(0);
   const [hasVoted, setHasVoted] = useState(false);
   const [comment, setComment] = useState('');
+  const [foodQuality, setFoodQuality] = useState(5);
+  const [hygiene, setHygiene] = useState(5);
+  const [availability, setAvailability] = useState(5);
+  const [maintenance, setMaintenance] = useState(5);
 
   const load = useCallback(async () => {
     const { data: listingData } = await supabase
@@ -42,6 +48,13 @@ export default function ListingDetailScreen() {
       .eq('id', params.listingId)
       .single();
     setListing(listingData as Listing);
+
+    const { data: ratingData } = await supabase
+      .from('listing_ratings')
+      .select('*')
+      .eq('listing_id', params.listingId)
+      .maybeSingle();
+    setRating(ratingData as ListingRating | null);
 
     const { data: reviewData } = await supabase
       .from('reviews')
@@ -86,7 +99,7 @@ export default function ListingDetailScreen() {
     load();
   }
 
-  async function submitReview(worthIt: boolean) {
+  async function submitReview() {
     if (!session) {
       navigation.navigate('SignIn');
       return;
@@ -96,7 +109,10 @@ export default function ListingDetailScreen() {
         listing_id: params.listingId,
         created_by: session.user.id,
         comment: comment.trim() || null,
-        worth_it: worthIt,
+        food_quality: foodQuality,
+        hygiene,
+        availability,
+        maintenance,
       },
       { onConflict: 'listing_id,created_by' }
     );
@@ -162,6 +178,8 @@ export default function ListingDetailScreen() {
         <Text style={styles.price}>₹{listing.price_rupees}</Text>
       </View>
 
+      <StarRatingDisplay rating={rating?.avg_rating ?? null} count={rating?.rating_count ?? 0} size={16} />
+
       {listing.note ? <Text style={styles.note}>{listing.note}</Text> : null}
 
       <View style={styles.actionsRow}>
@@ -181,28 +199,30 @@ export default function ListingDetailScreen() {
       <Text style={styles.sectionTitle}>Reviews ({reviews.length})</Text>
 
       <View style={styles.reviewForm}>
+        <StarRatingInput label="Food quality" value={foodQuality} onChange={setFoodQuality} />
+        <StarRatingInput label="Hygiene" value={hygiene} onChange={setHygiene} />
+        <StarRatingInput label="Availability" value={availability} onChange={setAvailability} />
+        <StarRatingInput label="Maintenance" value={maintenance} onChange={setMaintenance} />
         <TextInput
           style={styles.reviewInput}
           value={comment}
           onChangeText={setComment}
           placeholder="Add a comment (optional)"
         />
-        <View style={styles.reviewButtons}>
-          <Pressable style={styles.reviewYes} onPress={() => submitReview(true)}>
-            <Text style={styles.reviewButtonText}>Worth it</Text>
-          </Pressable>
-          <Pressable style={styles.reviewNo} onPress={() => submitReview(false)}>
-            <Text style={styles.reviewButtonText}>Not worth it</Text>
-          </Pressable>
-        </View>
+        <Pressable style={styles.reviewSubmit} onPress={submitReview}>
+          <Text style={styles.reviewSubmitText}>Submit review</Text>
+        </Pressable>
       </View>
 
-      {reviews.map((review) => (
-        <View key={review.id} style={styles.reviewCard}>
-          <Text style={styles.reviewVerdict}>{review.worth_it ? '👍 Worth it' : '👎 Not worth it'}</Text>
-          {review.comment ? <Text style={styles.reviewComment}>{review.comment}</Text> : null}
-        </View>
-      ))}
+      {reviews.map((review) => {
+        const reviewAvg = (review.food_quality + review.hygiene + review.availability + review.maintenance) / 4;
+        return (
+          <View key={review.id} style={styles.reviewCard}>
+            <StarRatingDisplay rating={reviewAvg} count={1} size={13} />
+            {review.comment ? <Text style={styles.reviewComment}>{review.comment}</Text> : null}
+          </View>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -247,20 +267,24 @@ const styles = StyleSheet.create({
   },
   reportButtonText: { color: '#a33' },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginTop: 28, marginBottom: 10 },
-  reviewForm: { marginBottom: 16 },
+  reviewForm: {
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 12,
+    padding: 14,
+  },
   reviewInput: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    marginBottom: 8,
+    marginTop: 4,
+    marginBottom: 10,
   },
-  reviewButtons: { flexDirection: 'row', gap: 10 },
-  reviewYes: { flex: 1, backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-  reviewNo: { flex: 1, backgroundColor: '#a33', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-  reviewButtonText: { color: '#fff', fontWeight: '600' },
+  reviewSubmit: { backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  reviewSubmitText: { color: '#fff', fontWeight: '700' },
   reviewCard: { borderTopWidth: 1, borderTopColor: '#eee', paddingVertical: 10 },
-  reviewVerdict: { fontWeight: '600' },
   reviewComment: { color: '#555', marginTop: 4 },
 });

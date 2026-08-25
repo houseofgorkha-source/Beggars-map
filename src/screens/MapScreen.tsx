@@ -17,12 +17,18 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import ListingsMap from '../components/ListingsMap';
 import BottomSheet, { type BottomSheetRef } from '../components/BottomSheet';
+import { StarRatingDisplay } from '../components/StarRating';
 import type { RootStackParamList } from '../navigation/types';
-import type { Listing } from '../types/database';
+import type { Listing, ListingRating } from '../types/database';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type ListingWithDistance = Listing & { distanceKm: number | null; voteCount: number };
+type ListingWithDistance = Listing & {
+  distanceKm: number | null;
+  voteCount: number;
+  avgRating: number | null;
+  ratingCount: number;
+};
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371;
@@ -55,19 +61,25 @@ export default function MapScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('listings')
-      .select('*, votes(count)')
-      .order('price_rupees', { ascending: true });
+    const [{ data, error }, { data: ratingsData }] = await Promise.all([
+      supabase.from('listings').select('*, votes(count)').order('price_rupees', { ascending: true }),
+      supabase.from('listing_ratings').select('*'),
+    ]);
 
     if (!error && data) {
-      const mapped: ListingWithDistance[] = data.map((row: any) => ({
-        ...row,
-        voteCount: row.votes?.[0]?.count ?? 0,
-        distanceKm: userLocation
-          ? distanceKm(userLocation.lat, userLocation.lon, row.latitude, row.longitude)
-          : null,
-      }));
+      const ratingsByListing = new Map((ratingsData as ListingRating[] | null)?.map((r) => [r.listing_id, r]));
+      const mapped: ListingWithDistance[] = data.map((row: any) => {
+        const rating = ratingsByListing.get(row.id);
+        return {
+          ...row,
+          voteCount: row.votes?.[0]?.count ?? 0,
+          avgRating: rating?.avg_rating ?? null,
+          ratingCount: rating?.rating_count ?? 0,
+          distanceKm: userLocation
+            ? distanceKm(userLocation.lat, userLocation.lon, row.latitude, row.longitude)
+            : null,
+        };
+      });
       setListings(mapped);
     }
     setLoading(false);
@@ -128,6 +140,7 @@ export default function MapScreen() {
                 <Text style={styles.cardTitle}>{item.name}</Text>
                 <Text style={styles.cardPrice}>₹{item.price_rupees}</Text>
               </View>
+              <StarRatingDisplay rating={item.avgRating} count={item.ratingCount} size={12} />
               {item.note ? (
                 <Text style={styles.cardNote} numberOfLines={2}>
                   {item.note}

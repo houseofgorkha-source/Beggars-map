@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
+import { checkFoodRelevance } from '../lib/contentModeration';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -154,12 +155,17 @@ export default function AddListingScreen() {
       Alert.alert('Name required', 'Give this spot a name.');
       return;
     }
-    if (!priceNumber || priceNumber <= 0) {
-      Alert.alert('Price required', 'Enter what a plate/meal costs there.');
+    if (!priceNumber || priceNumber <= 0 || priceNumber > 100) {
+      Alert.alert('Price must be ₹100 or under', 'Beggars Map only lists spots at ₹100 or less per plate/meal.');
       return;
     }
     if (!coords) {
       Alert.alert('Location required', 'Set a location using one of the options above.');
+      return;
+    }
+    const foodCheck = checkFoodRelevance(name, note);
+    if (!foodCheck.ok) {
+      Alert.alert('Food listings only', `Beggars Map is for cheap eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
       return;
     }
 
