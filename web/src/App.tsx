@@ -75,11 +75,14 @@ export default function App() {
       <main className="main">
         <section className="about-panel">
           <h1>About Beggars Map</h1>
-          <p className="about-lead">A community-driven directory of affordable meals in Bengaluru — every listing capped at ₹100, because a good meal shouldn't be a luxury.</p>
-          <p className="about-body">When an economy turns hard, it's the people who can least afford it who go hungry first — some lose their homes, some skip meals entirely. We believe everyone deserves at least one proper meal a day, and finding one shouldn't take a miracle.</p>
-          <p className="about-body">That's where you come in. Add the spots you know, and rate the ones you've tried — so the whole community knows exactly where ₹100 goes furthest.</p>
-          <p className="about-body">We have no partnerships or deals with any vendor or restaurant — every listing here is purely organic, added by people like you, not paid for by anyone.</p>
-          <p className="about-body">Our founder still insists 1 rupee is 100 paisa. A reminder that every coin counts, and so does every listing you add.</p>
+          <p className="about-lead">A community of people who know that a great meal doesn't have to cost a fortune. Every listing is ₹100 or less.</p>
+          <p className="about-body">We call ourselves the Beggars because we believe in asking a simple question: <strong>where does ₹100 go furthest?</strong></p>
+          <p className="about-body">Bengaluru is full of places serving honest, satisfying food at prices that make sense. The problem isn't always finding food. It's finding the <strong>good stuff</strong> without spending half your wallet discovering it.</p>
+          <p className="about-body">That's where Beggars Map comes in.</p>
+          <p className="about-body">We share the places we know, rate the food we've tried, and help each other discover meals worth every rupee. No fancy marketing. No paid rankings. Just people sharing what they've found.</p>
+          <p className="about-body"><strong>No partnerships. No sponsored listings. No paid placements.</strong> Every spot on Beggars Map comes from the community, and the community decides what deserves attention.</p>
+          <p className="about-body">Because ₹100 is ₹100. Whether you're a student, a traveller, a working professional, or simply someone who refuses to overpay for lunch, <strong>every rupee counts.</strong></p>
+          <p className="about-tagline">Find it. Eat it. Rate it. Pass it on.</p>
         </section>
 
         <div className="map-panel">
@@ -121,9 +124,9 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <a className="footer-link" href="tel:+919606002439">Call +91 96060 02439</a>
+        <span className="footer-text">App Store: Coming soon</span>
         <span className="footer-dot">·</span>
-        <a className="footer-link" href="https://wa.me/919606002439" target="_blank" rel="noreferrer">WhatsApp us</a>
+        <span className="footer-text">Play Store: Coming soon</span>
         <span className="footer-dot">·</span>
         <button className="footer-link footer-link-button" onClick={() => setLegalTab('privacy')}>Privacy Policy</button>
         <span className="footer-dot">·</span>
@@ -131,7 +134,9 @@ export default function App() {
       </footer>
 
       {showAdd ? <AddListingModal onClose={() => setShowAdd(false)} onPosted={handlePosted} /> : null}
-      {selectedListingId ? <ListingDetailModal listingId={selectedListingId} onClose={() => setSelectedListingId(null)} /> : null}
+      {selectedListingId ? (
+        <ListingDetailModal listingId={selectedListingId} onClose={() => setSelectedListingId(null)} onUpdated={load} />
+      ) : null}
       {legalTab ? <LegalModal initialTab={legalTab} onClose={() => setLegalTab(null)} /> : null}
     </div>
   );

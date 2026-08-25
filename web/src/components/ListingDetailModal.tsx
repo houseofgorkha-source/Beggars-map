@@ -6,11 +6,12 @@ import type { Listing, ListingRating, Review } from '../types';
 type Props = {
   listingId: string;
   onClose: () => void;
+  onUpdated?: () => void;
 };
 
 const REPORT_REASONS = ["Closed / doesn't exist", 'Wrong price', 'Inappropriate photo', 'Spam or duplicate'];
 
-export default function ListingDetailModal({ listingId, onClose }: Props) {
+export default function ListingDetailModal({ listingId, onClose, onUpdated }: Props) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [rating, setRating] = useState<ListingRating | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -67,6 +68,7 @@ export default function ListingDetailModal({ listingId, onClose }: Props) {
       await supabase.from('votes').insert({ listing_id: listingId, created_by: userId });
     }
     load();
+    onUpdated?.();
   }
 
   async function submitReview() {
@@ -87,6 +89,7 @@ export default function ListingDetailModal({ listingId, onClose }: Props) {
     );
     setComment('');
     load();
+    onUpdated?.();
   }
 
   async function reportListing(reason: string) {

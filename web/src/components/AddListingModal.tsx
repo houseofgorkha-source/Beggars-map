@@ -3,6 +3,7 @@ import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
+import { StarRatingInput } from './StarRating';
 import MapView from './MapView';
 
 type Props = {
@@ -36,6 +37,13 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
   const [pickedCenter, setPickedCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [addReview, setAddReview] = useState(false);
+  const [reviewComment, setReviewComment] = useState('');
+  const [foodQuality, setFoodQuality] = useState(5);
+  const [hygiene, setHygiene] = useState(5);
+  const [availability, setAvailability] = useState(5);
+  const [maintenance, setMaintenance] = useState(5);
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
@@ -136,19 +144,38 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
 
       const photoUrl = await uploadPhoto(userId);
 
-      const { error: insertError } = await supabase.from('listings').insert({
-        created_by: userId,
-        name: name.trim(),
-        price_rupees: priceNumber,
-        note: note.trim() || null,
-        photo_url: photoUrl,
-        latitude: coords.lat,
-        longitude: coords.lon,
-      });
+      const { data: inserted, error: insertError } = await supabase
+        .from('listings')
+        .insert({
+          created_by: userId,
+          name: name.trim(),
+          price_rupees: priceNumber,
+          note: note.trim() || null,
+          photo_url: photoUrl,
+          latitude: coords.lat,
+          longitude: coords.lon,
+        })
+        .select('id')
+        .single();
 
-      if (insertError) {
-        setError(insertError.message);
+      if (insertError || !inserted) {
+        setError(insertError?.message ?? 'Could not save listing.');
         return;
+      }
+
+      if (addReview) {
+        const { error: reviewError } = await supabase.from('reviews').insert({
+          listing_id: inserted.id,
+          created_by: userId,
+          comment: reviewComment.trim() || null,
+          food_quality: foodQuality,
+          hygiene,
+          availability,
+          maintenance,
+        });
+        // The listing itself is already saved — don't block closing the
+        // modal on a review hiccup, just let the person know it happened.
+        if (reviewError) window.alert('Listing posted, but your review could not be saved.');
       }
 
       onPosted();
@@ -238,10 +265,29 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
             </div>
           ) : null}
 
+          <label className="field-label">Already tried it? (optional)</label>
+          {!addReview ? (
+            <button className="secondary-button" onClick={() => setAddReview(true)}>+ Leave a review too</button>
+          ) : (
+            <div className="review-form">
+              <StarRatingInput label="Food quality" value={foodQuality} onChange={setFoodQuality} />
+              <StarRatingInput label="Hygiene" value={hygiene} onChange={setHygiene} />
+              <StarRatingInput label="Availability" value={availability} onChange={setAvailability} />
+              <StarRatingInput label="Maintenance" value={maintenance} onChange={setMaintenance} />
+              <input
+                className="text-input"
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="Add a comment (optional)"
+              />
+              <button className="text-button" onClick={() => setAddReview(false)}>Never mind, skip the review</button>
+            </div>
+          )}
+
           {error ? <div className="error-text">{error}</div> : null}
 
           <button className="primary-button submit-button" onClick={submit} disabled={submitting}>
-            {submitting ? 'Posting…' : 'Post listing'}
+            {submitting ? 'Posting…' : addReview ? 'Post listing & review' : 'Post listing'}
           </button>
         </div>
       </div>

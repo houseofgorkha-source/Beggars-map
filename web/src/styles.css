@@ -98,6 +98,17 @@ body {
   margin: 0 0 12px;
 }
 
+.about-body strong {
+  color: #0a0a0a;
+}
+
+.about-tagline {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0a7d3c;
+  margin: 16px 0 0;
+}
+
 .map-panel {
   flex: 1;
   position: relative;
@@ -715,6 +726,11 @@ body {
   text-decoration: underline;
 }
 
+.footer-text {
+  color: #888;
+  font-size: 13px;
+}
+
 .footer-link-button {
   background: none;
   border: none;
@@ -777,11 +793,13 @@ body {
 @media (max-width: 720px) {
   .main {
     flex-direction: column;
+    overflow-y: auto;
   }
   .about-panel {
     flex: none;
     border-right: none;
     border-bottom: 1px solid #eee;
+    overflow-y: visible;
   }
   .map-panel {
     flex: none;
@@ -789,8 +807,10 @@ body {
     padding: 12px;
   }
   .list-panel {
+    flex: none;
     max-width: none;
     border-left: none;
     border-top: 1px solid #eee;
+    overflow-y: visible;
   }
 }

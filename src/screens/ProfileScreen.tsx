@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
@@ -14,40 +14,42 @@ function AboutSection() {
     <View style={styles.about}>
       <Text style={styles.aboutTitle}>About Beggars Map</Text>
       <Text style={styles.aboutLead}>
-        A community-driven directory of affordable meals in Bengaluru — every listing capped at ₹100, because a
-        good meal shouldn't be a luxury.
+        A community of people who know that a great meal doesn't have to cost a fortune. Every listing is ₹100 or
+        less.
       </Text>
       <Text style={styles.aboutBody}>
-        When an economy turns hard, it's the people who can least afford it who go hungry first — some lose their
-        homes, some skip meals entirely. We believe everyone deserves at least one proper meal a day, and finding
-        one shouldn't take a miracle.
+        We call ourselves the Beggars because we believe in asking a simple question:{' '}
+        <Text style={styles.aboutBold}>where does ₹100 go furthest?</Text>
       </Text>
       <Text style={styles.aboutBody}>
-        That's where you come in. Add the spots you know, and rate the ones you've tried — so the whole community
-        knows exactly where ₹100 goes furthest.
+        Bengaluru is full of places serving honest, satisfying food at prices that make sense. The problem isn't
+        always finding food. It's finding the <Text style={styles.aboutBold}>good stuff</Text> without spending
+        half your wallet discovering it.
+      </Text>
+      <Text style={styles.aboutBody}>That's where Beggars Map comes in.</Text>
+      <Text style={styles.aboutBody}>
+        We share the places we know, rate the food we've tried, and help each other discover meals worth every
+        rupee. No fancy marketing. No paid rankings. Just people sharing what they've found.
       </Text>
       <Text style={styles.aboutBody}>
-        We have no partnerships or deals with any vendor or restaurant — every listing here is purely organic,
-        added by people like you, not paid for by anyone.
+        <Text style={styles.aboutBold}>No partnerships. No sponsored listings. No paid placements.</Text> Every
+        spot on Beggars Map comes from the community, and the community decides what deserves attention.
       </Text>
       <Text style={styles.aboutBody}>
-        Our founder still insists 1 rupee is 100 paisa. A reminder that every coin counts, and so does every
-        listing you add.
+        Because ₹100 is ₹100. Whether you're a student, a traveller, a working professional, or simply someone
+        who refuses to overpay for lunch, <Text style={styles.aboutBold}>every rupee counts.</Text>
       </Text>
+      <Text style={styles.aboutTagline}>Find it. Eat it. Rate it. Pass it on.</Text>
       <Text style={styles.comingSoon}>Launching soon in Delhi, Mumbai, Kolkata, Chennai, Guwahati and more</Text>
     </View>
   );
 }
 
-function ContactRow() {
+function StoreRow() {
   return (
     <View style={styles.contactRow}>
-      <Pressable onPress={() => Linking.openURL('tel:+919606002439')}>
-        <Text style={styles.contactLink}>Call +91 96060 02439</Text>
-      </Pressable>
-      <Pressable onPress={() => Linking.openURL('https://wa.me/919606002439')}>
-        <Text style={styles.contactLink}>WhatsApp us</Text>
-      </Pressable>
+      <Text style={styles.storeText}>App Store: Coming soon</Text>
+      <Text style={styles.storeText}>Play Store: Coming soon</Text>
     </View>
   );
 }
@@ -96,7 +98,7 @@ export default function ProfileScreen() {
             <Pressable style={styles.legalButton} onPress={() => navigation.navigate('Legal')}>
               <Text style={styles.legalButtonText}>Privacy Policy & Terms</Text>
             </Pressable>
-            <ContactRow />
+            <StoreRow />
             <AboutSection />
           </View>
         }
@@ -115,7 +117,7 @@ export default function ProfileScreen() {
         <Pressable onPress={() => navigation.navigate('Legal')}>
           <Text style={styles.legalLink}>Privacy Policy & Terms</Text>
         </Pressable>
-        <ContactRow />
+        <StoreRow />
       </View>
 
       <Text style={styles.sectionTitle}>My listings ({myListings.length})</Text>
@@ -168,11 +170,13 @@ const styles = StyleSheet.create({
   cardTitle: { fontWeight: '600' },
   cardPrice: { fontWeight: '700', color: '#0a7d3c' },
   contactRow: { flexDirection: 'row', gap: 16, marginTop: 12 },
-  contactLink: { color: '#0a7d3c', fontWeight: '600', fontSize: 13 },
+  storeText: { color: '#888', fontWeight: '600', fontSize: 13 },
   about: { padding: 24, alignItems: 'center' },
   aboutTitle: { fontSize: 24, fontWeight: '900', marginBottom: 12, textAlign: 'center' },
   aboutLead: { fontSize: 16, fontWeight: '600', lineHeight: 23, color: '#333', textAlign: 'center', marginBottom: 12 },
   aboutBody: { fontSize: 14, lineHeight: 21, color: '#555', textAlign: 'center', marginBottom: 10 },
+  aboutBold: { color: '#0a0a0a', fontWeight: '700' },
+  aboutTagline: { fontSize: 15, fontWeight: '700', color: '#0a7d3c', textAlign: 'center', marginTop: 6, marginBottom: 4 },
   comingSoon: {
     marginTop: 8,
     fontSize: 13,
