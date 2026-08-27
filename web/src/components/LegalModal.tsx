@@ -42,10 +42,10 @@ export default function LegalModal({ initialTab, onClose }: Props) {
               <p>Only the infrastructure that makes the product work: Supabase (our database, authentication, and file storage provider), OLA Maps / Krutrim (map tiles and place search — receives your search text and approximate location when you use map features), and Google (mobile sign-in only, if you choose it).</p>
 
               <h3>Anonymous web sessions</h3>
-              <p>The web app currently posts and votes without any login, using a silent per-visitor session with no personal data attached. This is temporary — once the mobile app is live on the Play Store, the web app will also require sign-in, matching mobile.</p>
+              <p>The web app posts and votes without any login, using a silent per-visitor session with no personal data attached. This is the intended design for web, not a placeholder — browsing and contributing on web will keep working without sign-in.</p>
 
               <h3>Your rights</h3>
-              <p>Web contributions aren't tied to any personal information, so there's nothing to look up by for a takedown/removal request from an anonymous session. On mobile (Google sign-in), reach out via the contact details below and we'll act on requests to remove your account or content.</p>
+              <p>You can delete your own listings and reviews at any time directly from the app or site — look for "Delete my listing" / "Delete my review" on the listing you posted. On mobile (Google sign-in), you can also delete your entire account and everything tied to it from your Profile screen. Web contributions aren't tied to any personal information, so there's no separate identity to look up for a takedown request from an anonymous session — deleting the content yourself is the way to remove it. Questions or removal requests we can't handle in-app can go to the contact details below.</p>
 
               <h3>Cookies &amp; local storage</h3>
               <p>The web app uses browser local storage to remember your anonymous session. No advertising or third-party tracking cookies.</p>

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -17,21 +18,29 @@ import type { RootStackParamList, TabParamList } from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
-// Never actually rendered — the Contribute tab's press is always intercepted
+// Normally not rendered at all — the Contribute tab's press is intercepted
 // and redirected to the AddListing/SignIn screen on the root stack instead.
+// It only actually renders (briefly) when the initial session fetch is still
+// in flight, so it can wait for `loading` to resolve before deciding where
+// to send the user instead of guessing "no session yet" as "signed out".
 function ContributeRedirect() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
 
   useEffect(() => {
+    if (loading) return;
     navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()?.navigate(session ? 'AddListing' : 'SignIn');
-  }, [navigation, session]);
+  }, [navigation, session, loading]);
 
-  return null;
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator />
+    </View>
+  );
 }
 
 function Tabs() {
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
 
   return (
     <Tab.Navigator screenOptions={{ headerShown: true }}>
@@ -41,6 +50,12 @@ function Tabs() {
         component={ContributeRedirect}
         listeners={({ navigation }) => ({
           tabPress: (e) => {
+            if (loading) {
+              // Session status isn't known yet — let the tab switch happen
+              // normally so ContributeRedirect can wait it out and redirect
+              // once it resolves, instead of guessing "signed out" here.
+              return;
+            }
             e.preventDefault();
             navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()?.navigate(
               session ? 'AddListing' : 'SignIn'

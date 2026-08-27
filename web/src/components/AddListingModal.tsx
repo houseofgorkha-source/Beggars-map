@@ -9,13 +9,14 @@ import MapView from './MapView';
 type Props = {
   onClose: () => void;
   onPosted: () => void;
+  initialCoords?: { lat: number; lon: number };
 };
 
 type LocationMode = 'current' | 'map' | 'search' | 'link';
 
 const DEFAULT_CENTER: [number, number] = [77.5946, 12.9716];
 
-export default function AddListingModal({ onClose, onPosted }: Props) {
+export default function AddListingModal({ onClose, onPosted, initialCoords }: Props) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [note, setNote] = useState('');
@@ -23,7 +24,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(initialCoords ?? null);
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
 
@@ -108,7 +109,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
     setPhotoPreview(URL.createObjectURL(file));
   }
 
-  async function uploadPhoto(userId: string): Promise<string | null> {
+  async function uploadPhoto(userId: string): Promise<{ url: string; path: string } | null> {
     if (!photoFile) return null;
     const ext = photoFile.name.split('.').pop() ?? 'jpg';
     const path = `${userId}/${Date.now()}.${ext}`;
@@ -119,7 +120,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
     if (uploadError) return null;
 
     const { data } = supabase.storage.from('listing-photos').getPublicUrl(path);
-    return data.publicUrl;
+    return { url: data.publicUrl, path };
   }
 
   async function submit() {
@@ -142,7 +143,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
         return;
       }
 
-      const photoUrl = await uploadPhoto(userId);
+      const photo = await uploadPhoto(userId);
 
       const { data: inserted, error: insertError } = await supabase
         .from('listings')
@@ -151,7 +152,7 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
           name: name.trim(),
           price_rupees: priceNumber,
           note: note.trim() || null,
-          photo_url: photoUrl,
+          photo_url: photo?.url ?? null,
           latitude: coords.lat,
           longitude: coords.lon,
         })
@@ -159,6 +160,11 @@ export default function AddListingModal({ onClose, onPosted }: Props) {
         .single();
 
       if (insertError || !inserted) {
+        // The listing never got created, so this upload is orphaned — clean
+        // it up rather than leaving it in storage forever. Best-effort: if
+        // this delete also fails, the original insert error is still what
+        // gets shown to the user.
+        if (photo) await supabase.storage.from('listing-photos').remove([photo.path]);
         setError(insertError?.message ?? 'Could not save listing.');
         return;
       }

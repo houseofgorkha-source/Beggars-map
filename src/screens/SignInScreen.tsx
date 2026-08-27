@@ -35,6 +35,18 @@ export default function SignInScreen() {
           <Text style={styles.buttonText}>Continue with Google</Text>
         )}
       </Pressable>
+
+      <Text style={styles.legalNotice}>
+        By continuing you agree to our{' '}
+        <Text style={styles.legalLink} onPress={() => navigation.navigate('Legal', { tab: 'privacy' })}>
+          Privacy Policy
+        </Text>{' '}
+        and{' '}
+        <Text style={styles.legalLink} onPress={() => navigation.navigate('Legal', { tab: 'terms' })}>
+          Terms &amp; Conditions
+        </Text>
+        .
+      </Text>
     </View>
   );
 }
@@ -45,4 +57,6 @@ const styles = StyleSheet.create({
   subtitle: { color: '#666', textAlign: 'center', marginBottom: 24 },
   button: { backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  legalNotice: { color: '#888', fontSize: 12, textAlign: 'center', marginTop: 20, lineHeight: 18 },
+  legalLink: { color: '#0a7d3c', fontWeight: '600' },
 });

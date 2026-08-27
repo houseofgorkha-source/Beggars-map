@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +16,7 @@ import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth';
 import ListingsMap from '../components/ListingsMap';
 import BottomSheet, { type BottomSheetRef } from '../components/BottomSheet';
 import { StarRatingDisplay } from '../components/StarRating';
@@ -42,6 +44,7 @@ function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
 
 export default function MapScreen() {
   const navigation = useNavigation<Nav>();
+  const { session } = useAuth();
   const { height } = useWindowDimensions();
   const sheetRef = useRef<BottomSheetRef>(null);
   const [listings, setListings] = useState<ListingWithDistance[]>([]);
@@ -91,6 +94,20 @@ export default function MapScreen() {
     }, [load])
   );
 
+  function handleMapLongPress(latitude: number, longitude: number) {
+    if (!session) {
+      navigation.navigate('SignIn');
+      return;
+    }
+    Alert.alert('Add a listing here?', 'Start adding a cheap-eat spot at this location.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Add listing',
+        onPress: () => navigation.navigate('AddListing', { pickedLatitude: latitude, pickedLongitude: longitude }),
+      },
+    ]);
+  }
+
   const filtered = listings.filter((l) => l.name.toLowerCase().includes(query.toLowerCase()));
   const collapsedHeight = 140;
   const expandedHeight = Math.round(height * 0.72);
@@ -100,7 +117,14 @@ export default function MapScreen() {
       <ListingsMap
         listings={filtered}
         onSelectListing={(listingId) => navigation.navigate('ListingDetail', { listingId })}
+        onLongPress={handleMapLongPress}
       />
+
+      {!sheetExpanded ? (
+        <View style={styles.longPressHint} pointerEvents="none">
+          <Text style={styles.longPressHintText}>Long-press the map to add a spot</Text>
+        </View>
+      ) : null}
 
       {sheetExpanded ? (
         <Pressable style={styles.tapOutside} onPress={() => sheetRef.current?.collapse()} />
@@ -189,4 +213,14 @@ const styles = StyleSheet.create({
   cardMeta: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cardMetaText: { color: '#888', fontSize: 13 },
   tapOutside: { ...StyleSheet.absoluteFillObject },
+  longPressHint: {
+    position: 'absolute',
+    top: 16,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  longPressHintText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 });

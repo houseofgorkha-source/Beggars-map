@@ -131,7 +131,7 @@ export default function AddListingScreen() {
     }
   }
 
-  async function uploadPhoto(userId: string): Promise<string | null> {
+  async function uploadPhoto(userId: string): Promise<{ url: string; path: string } | null> {
     if (!photoUri) return null;
     const response = await fetch(photoUri);
     const blob = await response.arrayBuffer();
@@ -144,7 +144,7 @@ export default function AddListingScreen() {
     if (error) return null;
 
     const { data } = supabase.storage.from('listing-photos').getPublicUrl(path);
-    return data.publicUrl;
+    return { url: data.publicUrl, path };
   }
 
   async function submit() {
@@ -171,19 +171,24 @@ export default function AddListingScreen() {
 
     setSubmitting(true);
     try {
-      const photoUrl = await uploadPhoto(session.user.id);
+      const photo = await uploadPhoto(session.user.id);
 
       const { error } = await supabase.from('listings').insert({
         created_by: session.user.id,
         name: name.trim(),
         price_rupees: priceNumber,
         note: note.trim() || null,
-        photo_url: photoUrl,
+        photo_url: photo?.url ?? null,
         latitude: coords.lat,
         longitude: coords.lon,
       });
 
       if (error) {
+        // The listing never got created, so this upload is orphaned — clean
+        // it up rather than leaving it in storage forever. Best-effort: if
+        // this delete also fails, the original insert error is still what
+        // gets shown to the user.
+        if (photo) await supabase.storage.from('listing-photos').remove([photo.path]);
         Alert.alert('Could not save listing', error.message);
         return;
       }

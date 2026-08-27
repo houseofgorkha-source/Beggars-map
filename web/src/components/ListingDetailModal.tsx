@@ -23,25 +23,37 @@ export default function ListingDetailModal({ listingId, onClose, onUpdated }: Pr
   const [availability, setAvailability] = useState(5);
   const [maintenance, setMaintenance] = useState(5);
   const [reporting, setReporting] = useState(false);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
   async function load() {
-    const { data: listingData } = await supabase.from('listings').select('*').eq('id', listingId).single();
+    // None of these depend on each other's results, so run them concurrently
+    // instead of one round-trip after another.
+    const [{ data: listingData, error: listingError }, { data: ratingData }, { data: reviewData }, { count }, userId] =
+      await Promise.all([
+        supabase.from('listings').select('*').eq('id', listingId).maybeSingle(),
+        supabase.from('listing_ratings').select('*').eq('listing_id', listingId).maybeSingle(),
+        supabase.from('reviews').select('*').eq('listing_id', listingId).order('created_at', { ascending: false }),
+        supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId),
+        ensureAnonymousSession(),
+      ]);
+
+    // A listing that's been deleted, or hidden by moderation (RLS filters it
+    // out of public SELECT), comes back as no row rather than an error —
+    // .maybeSingle() (not .single()) is what makes that "no row" case land
+    // here as null instead of throwing, so we can tell it apart from "still
+    // fetching" and show a real message instead of spinning forever.
+    if (listingError || !listingData) {
+      setNotFound(true);
+      return;
+    }
+
     setListing(listingData as Listing);
-
-    const { data: ratingData } = await supabase.from('listing_ratings').select('*').eq('listing_id', listingId).maybeSingle();
     setRating(ratingData as ListingRating | null);
-
-    const { data: reviewData } = await supabase
-      .from('reviews')
-      .select('*')
-      .eq('listing_id', listingId)
-      .order('created_at', { ascending: false });
     setReviews((reviewData as Review[]) ?? []);
-
-    const { count } = await supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId);
     setVoteCount(count ?? 0);
+    setMyUserId(userId);
 
-    const userId = await ensureAnonymousSession();
     if (userId) {
       const { data: myVote } = await supabase
         .from('votes')
@@ -94,9 +106,51 @@ export default function ListingDetailModal({ listingId, onClose, onUpdated }: Pr
 
   async function reportListing(reason: string) {
     const userId = await ensureAnonymousSession();
-    if (!userId) return;
-    await supabase.from('reports').insert({ listing_id: listingId, reported_by: userId, reason });
+    if (!userId) {
+      window.alert('Could not start a session. Please refresh and try again.');
+      return;
+    }
+    const { error: reportError } = await supabase.from('reports').insert({ listing_id: listingId, reported_by: userId, reason });
+    if (reportError) {
+      if (reportError.code === '23505') {
+        setReporting(false);
+        window.alert("You've already reported this listing for that reason.");
+        return;
+      }
+      window.alert(`Could not send report: ${reportError.message}`);
+      return;
+    }
     setReporting(false);
+    window.alert('Thanks — this has been reported.');
+  }
+
+  async function deleteListing() {
+    if (!listing) return;
+    if (!window.confirm('Delete this listing? This removes it for everyone and cannot be undone.')) return;
+
+    const { error } = await supabase.from('listings').delete().eq('id', listing.id);
+    if (error) {
+      window.alert(`Could not delete listing: ${error.message}`);
+      return;
+    }
+    if (listing.photo_url) {
+      const path = listing.photo_url.split('/listing-photos/')[1];
+      if (path) await supabase.storage.from('listing-photos').remove([path]);
+    }
+    onUpdated?.();
+    onClose();
+  }
+
+  async function deleteReview(reviewId: string) {
+    if (!window.confirm('Delete your review? This cannot be undone.')) return;
+
+    const { error } = await supabase.from('reviews').delete().eq('id', reviewId);
+    if (error) {
+      window.alert(`Could not delete review: ${error.message}`);
+      return;
+    }
+    load();
+    onUpdated?.();
   }
 
   function openDirections() {
@@ -104,19 +158,28 @@ export default function ListingDetailModal({ listingId, onClose, onUpdated }: Pr
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${listing.latitude},${listing.longitude}`, '_blank');
   }
 
+  if (notFound) {
+    return (
+      <div className="listing-cover">
+        <div className="modal-header">
+          <h2>Not available</h2>
+          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <p className="loading-text">This listing is no longer available.</p>
+      </div>
+    );
+  }
+
   if (!listing) {
     return (
-      <div className="modal-backdrop" onClick={onClose}>
-        <div className="modal" onClick={(e) => e.stopPropagation()}>
-          <p className="loading-text">Loading…</p>
-        </div>
+      <div className="listing-cover">
+        <p className="loading-text">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="listing-cover">
         <div className="modal-header">
           <h2>{listing.name}</h2>
           <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
@@ -139,6 +202,10 @@ export default function ListingDetailModal({ listingId, onClose, onUpdated }: Pr
             <button className="secondary-button" onClick={openDirections}>Directions</button>
             <button className="report-button" onClick={() => setReporting(true)}>Report</button>
           </div>
+
+          {myUserId && listing.created_by === myUserId ? (
+            <button className="text-button delete-listing-button" onClick={deleteListing}>Delete my listing</button>
+          ) : null}
 
           {reporting ? (
             <div className="report-panel">
@@ -168,11 +235,13 @@ export default function ListingDetailModal({ listingId, onClose, onUpdated }: Pr
               <div key={review.id} className="review-card">
                 <StarRatingDisplay rating={reviewAvg} count={1} small />
                 {review.comment ? <div className="review-comment">{review.comment}</div> : null}
+                {myUserId && review.created_by === myUserId ? (
+                  <button className="text-button delete-review-button" onClick={() => deleteReview(review.id)}>Delete my review</button>
+                ) : null}
               </div>
             );
           })}
         </div>
-      </div>
     </div>
   );
 }

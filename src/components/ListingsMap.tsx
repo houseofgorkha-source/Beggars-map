@@ -1,15 +1,18 @@
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Camera, Map, Marker, UserLocation } from '@maplibre/maplibre-react-native';
+import type { PressEvent } from '@maplibre/maplibre-react-native';
+import type { NativeSyntheticEvent } from 'react-native';
 import { boundsForPoints, vectorStyleUrl } from '../lib/olaMaps';
 import type { Listing } from '../types/database';
 
 type Props = {
   listings: Listing[];
   onSelectListing: (listingId: string) => void;
+  onLongPress?: (latitude: number, longitude: number) => void;
 };
 
-export default function ListingsMap({ listings, onSelectListing }: Props) {
+export default function ListingsMap({ listings, onSelectListing, onLongPress }: Props) {
   const styleUrl = vectorStyleUrl();
   const bounds = useMemo(() => boundsForPoints(listings.map((l) => ({ latitude: l.latitude, longitude: l.longitude }))), [listings]);
 
@@ -22,7 +25,18 @@ export default function ListingsMap({ listings, onSelectListing }: Props) {
   }
 
   return (
-    <Map style={styles.map} mapStyle={styleUrl}>
+    <Map
+      style={styles.map}
+      mapStyle={styleUrl}
+      onLongPress={
+        onLongPress
+          ? (event: NativeSyntheticEvent<PressEvent>) => {
+              const [longitude, latitude] = event.nativeEvent.lngLat;
+              onLongPress(latitude, longitude);
+            }
+          : undefined
+      }
+    >
       <Camera
         initialViewState={
           bounds

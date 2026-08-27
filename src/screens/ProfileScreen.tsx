@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
@@ -59,6 +59,29 @@ export default function ProfileScreen() {
   const { session, profile, signOut } = useAuth();
   const [myListings, setMyListings] = useState<Listing[]>([]);
   const [rank, setRank] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete your account?',
+      'This permanently deletes your account, your listings, reviews, and votes. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete account', style: 'destructive', onPress: deleteAccount },
+      ]
+    );
+  }
+
+  async function deleteAccount() {
+    setDeleting(true);
+    const { error } = await supabase.functions.invoke('delete-account');
+    setDeleting(false);
+    if (error) {
+      Alert.alert('Could not delete account', error.message);
+      return;
+    }
+    await signOut();
+  }
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -114,6 +137,9 @@ export default function ProfileScreen() {
         <Pressable style={styles.signOutButton} onPress={signOut}>
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
+        <Pressable style={styles.deleteAccountButton} onPress={confirmDeleteAccount} disabled={deleting}>
+          <Text style={styles.deleteAccountText}>{deleting ? 'Deleting…' : 'Delete my account'}</Text>
+        </Pressable>
         <Pressable onPress={() => navigation.navigate('Legal')}>
           <Text style={styles.legalLink}>Privacy Policy & Terms</Text>
         </Pressable>
@@ -154,6 +180,8 @@ const styles = StyleSheet.create({
   rank: { color: '#0a7d3c', fontWeight: '600', marginTop: 4 },
   signOutButton: { marginTop: 12, alignSelf: 'flex-start' },
   signOutText: { color: '#a33' },
+  deleteAccountButton: { marginTop: 12, alignSelf: 'flex-start' },
+  deleteAccountText: { color: '#a33', fontSize: 13, textDecorationLine: 'underline' },
   legalLink: { color: '#888', fontSize: 13, textDecorationLine: 'underline', marginTop: 10 },
   sectionTitle: { fontSize: 15, fontWeight: '700', margin: 16, marginBottom: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
