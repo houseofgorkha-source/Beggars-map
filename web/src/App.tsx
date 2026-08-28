@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
+import { formatRelativeTime } from './lib/relativeTime';
 import MapView from './components/MapView';
 import Logo from './components/Logo';
 import AddListingModal from './components/AddListingModal';
 import ListingDetailModal from './components/ListingDetailModal';
+import ListingPreviewCard from './components/ListingPreviewCard';
 import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
 import AboutModal from './components/AboutModal';
@@ -22,6 +24,11 @@ export default function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [addInitialCoords, setAddInitialCoords] = useState<{ lat: number; lon: number } | undefined>(undefined);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  // Mobile-web only: set by selectListing() instead of selectedListingId
+  // when the viewport is at/under the app's existing 720px mobile
+  // breakpoint. Desktop is untouched — selectListing keeps setting
+  // selectedListingId directly there, same as before this feature existed.
+  const [previewListingId, setPreviewListingId] = useState<string | null>(null);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms' | null>(null);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -110,6 +117,8 @@ export default function App() {
     [listings, query]
   );
 
+  const previewListing = previewListingId ? listings.find((l) => l.id === previewListingId) ?? null : null;
+
   // Landmark search on the browse map — separate from the substring filter
   // above (runs on every keystroke, no debounce, purely local): this
   // debounces a call out to OLA Places so searching a landmark (not
@@ -162,10 +171,10 @@ export default function App() {
   // selection anyway so the *card list* also starts from its top instead
   // of wherever it was left scrolled.
   useEffect(() => {
-    if (selectedListingId) {
+    if (selectedListingId || previewListingId) {
       listPanelRef.current?.scrollTo({ top: 0 });
     }
-  }, [selectedListingId]);
+  }, [selectedListingId, previewListingId]);
 
   // FLIP animation: the clicked list-card visibly "flies" from where it
   // was in the list up into the detail-card slot at the top, instead of
@@ -252,13 +261,31 @@ export default function App() {
   // Selecting a listing (map marker or list card) shares the exact same
   // camera mechanism as a landmark search — same pan+zoom, same reliability
   // — instead of relying solely on the info-window effect's own panTo.
+  // On mobile web (<=720px, same breakpoint the rest of the app already
+  // uses) this opens the lean ListingPreviewCard instead of jumping
+  // straight into the full ListingDetailModal — desktop is unaffected.
   function selectListing(id: string) {
-    setSelectedListingId(id);
+    const isMobile = window.matchMedia('(max-width: 720px)').matches;
+    if (isMobile) {
+      setPreviewListingId(id);
+      setSelectedListingId(null);
+    } else {
+      setSelectedListingId(id);
+      setPreviewListingId(null);
+    }
     setSearchPin(null);
     const listing = listings.find((l) => l.id === id);
     if (listing) {
       setFlyToCenter((prev) => ({ center: [listing.longitude, listing.latitude], token: (prev?.token ?? 0) + 1 }));
     }
+  }
+
+  // Preview card's "Tap for full details" — hands off to the same full
+  // ListingDetailModal desktop already opens directly.
+  function openPreviewDetails() {
+    if (!previewListingId) return;
+    setSelectedListingId(previewListingId);
+    setPreviewListingId(null);
   }
 
   function handlePosted() {
@@ -276,6 +303,7 @@ export default function App() {
   // so a stray/misplaced tap doesn't immediately launch the form.
   function handleMapClick(latitude: number, longitude: number) {
     setSearchPin({ lat: latitude, lng: longitude });
+    setPreviewListingId(null);
   }
 
   // "Pick on map" inside an already-open Add Listing modal hides that modal
@@ -349,7 +377,7 @@ export default function App() {
               onMapClick={handleMapClick}
               flyToCenter={flyToCenter ?? undefined}
               searchPin={searchPin}
-              selectedListingId={pickingLocation ? null : selectedListingId}
+              selectedListingId={pickingLocation ? null : (previewListingId ?? selectedListingId)}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -424,7 +452,13 @@ export default function App() {
             )}
 
             <div className="list-panel-outer" style={sidePanelTop != null ? { top: sidePanelTop } : undefined}>
-              {selectedListingId ? (
+              {previewListing ? (
+                <ListingPreviewCard
+                  listing={previewListing}
+                  onClose={() => setPreviewListingId(null)}
+                  onViewDetails={openPreviewDetails}
+                />
+              ) : selectedListingId ? (
                 <ListingDetailModal ref={coverRef} listingId={selectedListingId} onClose={() => setSelectedListingId(null)} onUpdated={load} />
               ) : null}
 
@@ -471,7 +505,10 @@ export default function App() {
                         <span className="list-card-price">₹{listing.price_rupees}</span>
                       </div>
                       {listing.note ? <p className="list-card-note">{listing.note}</p> : null}
-                      <span className="list-card-votes">▲ {listing.voteCount}</span>
+                      <div className="list-card-footer">
+                        <span className="list-card-votes">▲ {listing.voteCount}</span>
+                        <span className="list-card-posted">{formatRelativeTime(listing.created_at)}</span>
+                      </div>
                     </div>
                   ))}
               </aside>

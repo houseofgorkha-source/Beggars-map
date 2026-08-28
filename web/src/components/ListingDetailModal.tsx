@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
+import { formatRelativeTime } from '../lib/relativeTime';
 import type { Listing } from '../types';
 
 type Props = {
@@ -154,6 +155,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             <span className="detail-price">₹{listing.price_rupees}</span>
             {listing.note ? <span className="detail-note">{listing.note}</span> : null}
           </div>
+          <span className="detail-posted">Posted {formatRelativeTime(listing.created_at)}</span>
 
           <div className="detail-actions">
             <button className={`vote-button ${hasVoted ? 'active' : ''}`} onClick={toggleVote}>
