@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { formatRelativeTime } from '../lib/relativeTime';
 import type { Listing } from '../types';
@@ -7,17 +7,49 @@ type Props = {
   listingId: string;
   onClose: () => void;
   onUpdated?: () => void;
+  // Mobile-web's "tiny complete card" layout — same data/handlers as the
+  // desktop card below, just a wholly different (much smaller) render path.
+  // Never true on desktop/tablet — see the `isMobile` gate in App.tsx.
+  compact?: boolean;
 };
 
 const REPORT_REASONS = ["Closed / doesn't exist", 'Wrong price', 'Inappropriate photo', 'Spam or duplicate'];
+
+function DirectionsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="3 11 22 2 13 21 11 13 3 11" />
+    </svg>
+  );
+}
+
+function FlagIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <line x1="4" y1="22" x2="4" y2="3" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
 
 // Forwards a ref to the root `.listing-cover` element so App.tsx can play a
 // "this card flew up from its spot in the list" animation (a FLIP: capture
 // the clicked list-card's position, then transform this element from that
 // position back to `translate(0)`) — see the effect around `flyFromTop` in
-// App.tsx.
+// App.tsx. The same ref is also what App.tsx's mobile sheet measures (via
+// ResizeObserver) to size the collapsed "map mode" sheet height around the
+// compact card's real rendered content.
 const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDetailModal(
-  { listingId, onClose, onUpdated },
+  { listingId, onClose, onUpdated, compact },
   ref
 ) {
   const [listing, setListing] = useState<Listing | null>(null);
@@ -26,6 +58,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   const [reporting, setReporting] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const reportWrapRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     // None of these depend on each other's results, so run them concurrently
@@ -65,6 +98,21 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
+
+  // The compact card's report reasons render as a small floating popover
+  // (not an inline-expanding panel — that would grow the card and force the
+  // internal scrolling the compact layout is required not to have). Closes
+  // on an outside tap, same pattern as the search-results dropdown in
+  // App.tsx.
+  useEffect(() => {
+    if (!compact || !reporting) return;
+    function handlePointerDown(e: MouseEvent) {
+      if (reportWrapRef.current?.contains(e.target as Node)) return;
+      setReporting(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [compact, reporting]);
 
   async function toggleVote() {
     const userId = await ensureAnonymousSession();
@@ -123,20 +171,82 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
 
   if (notFound) {
     return (
-      <div className="listing-cover" ref={ref}>
-        <div className="modal-header">
-          <h2>Not available</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <p className="loading-text">This listing is no longer available.</p>
+      <div className={`listing-cover${compact ? ' listing-cover-compact' : ''}`} ref={ref}>
+        {compact ? (
+          <div className="compact-top">
+            <span className="compact-empty-text">This listing is no longer available.</span>
+            <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
+          </div>
+        ) : (
+          <>
+            <div className="modal-header">
+              <h2>Not available</h2>
+              <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+            </div>
+            <p className="loading-text">This listing is no longer available.</p>
+          </>
+        )}
       </div>
     );
   }
 
   if (!listing) {
     return (
-      <div className="listing-cover" ref={ref}>
-        <p className="loading-text">Loading…</p>
+      <div className={`listing-cover${compact ? ' listing-cover-compact' : ''}`} ref={ref}>
+        <p className={compact ? 'compact-empty-text' : 'loading-text'}>Loading…</p>
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="listing-cover listing-cover-compact" ref={ref}>
+        <div className="compact-top">
+          {listing.photo_url ? <img src={listing.photo_url} alt="" className="compact-thumb" /> : null}
+          <div className="compact-top-text">
+            <div className="compact-title-row">
+              <span className="compact-title">{listing.name}</span>
+              <span className="compact-price">₹{listing.price_rupees}</span>
+            </div>
+            {listing.note ? <p className="compact-note">{listing.note}</p> : null}
+          </div>
+          <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="compact-footer">
+          <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
+          <div className="compact-actions">
+            <button className={`compact-vote ${hasVoted ? 'active' : ''}`} onClick={toggleVote} aria-label="Worth it">
+              ▲ {voteCount}
+            </button>
+            <button className="compact-icon-button" onClick={openDirections} aria-label="Directions">
+              <DirectionsIcon />
+            </button>
+            <div className="compact-report-wrap" ref={reportWrapRef}>
+              <button
+                className="compact-icon-button compact-report-trigger"
+                onClick={() => setReporting((r) => !r)}
+                aria-label="Report"
+              >
+                <FlagIcon />
+              </button>
+              {reporting ? (
+                <div className="compact-report-popover">
+                  {REPORT_REASONS.map((reason) => (
+                    <button key={reason} className="compact-report-reason" onClick={() => reportListing(reason)}>
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {myUserId && listing.created_by === myUserId ? (
+              <button className="compact-icon-button compact-delete" onClick={deleteListing} aria-label="Delete my listing">
+                <TrashIcon />
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
     );
   }

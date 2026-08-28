@@ -23,25 +23,48 @@ const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'
 // drift apart.
 const MOBILE_MEDIA_QUERY = '(max-width: 720px), (hover: none) and (pointer: coarse) and (max-height: 500px)';
 
-// The mobile bottom sheet's three snap states, as a fraction of the map
-// frame's own height — clamped in computeSheetSnaps below so extreme
-// container heights (a very short phone-landscape frame, say) can't
-// invert the ordering or collapse a state down to nothing.
-type SheetState = 'collapsed' | 'partial' | 'expanded';
+// Two independent interaction modes, not a continuum: MAP mode (default —
+// the map fills the screen, the sheet is shrunk to just its drag handle
+// plus, if something's selected, the tiny compact card) and LIST mode (the
+// sheet takes over as the primary surface, map "gets out of the way").
+// There is deliberately no third "partial" state — that in-between size was
+// what let the map and list fight over the same screen in the old design.
+type SheetState = 'map' | 'list';
 
-function computeSheetSnaps(containerHeight: number) {
-  const collapsed = Math.round(Math.max(96, Math.min(150, containerHeight * 0.22)));
-  const expanded = Math.round(Math.max(collapsed + 80, containerHeight * 0.86));
-  // 150px floor (not just collapsed + 40) keeps "partial" at or above
-  // .listing-cover's own 140px CSS min-height on very short (phone
-  // landscape) frames — otherwise a selection auto-expanding into
-  // "partial" could hand the detail card less room than its own floor
-  // demands, forcing a few px of overflow out of the sheet.
-  const partial = Math.round(Math.max(150, collapsed + 40, Math.min(expanded - 40, containerHeight * 0.48)));
-  return { collapsed, partial, expanded };
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const handler = () => setMatches(mq.matches);
+    handler();
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [query]);
+  return matches;
+}
+
+// The MAP-mode snap height is derived from the actual measured height of
+// the sheet's "peek zone" (drag handle + hint pill, or drag handle + the
+// compact selected-listing card) — not a guessed constant — so the sheet is
+// always sized to exactly fit whatever's peeking above it, with zero list
+// content showing through. LIST mode stays a generous fraction of the
+// frame, same idea as before, just without the old "partial" middle step —
+// but capped by `containerHeight - TOP_RESERVE_PX` as a hard ceiling, not
+// just a fraction of the frame. Without that hard cap, a short (landscape)
+// frame could compute a LIST height tall enough that the sheet's own top
+// edge — where the drag handle lives — ends up underneath the floating
+// search/Contribute row pinned near the frame's actual top edge. That row
+// sits at a higher z-index, so it silently swallows the drag handle's
+// pointer events, making the sheet impossible to drag back down.
+const TOP_RESERVE_PX = 70;
+function computeSheetSnaps(containerHeight: number, peekContentHeight: number) {
+  const map = Math.round(Math.max(48, Math.min(containerHeight * 0.6, peekContentHeight)));
+  const list = Math.round(Math.max(map + 24, Math.min(containerHeight * 0.86, containerHeight - TOP_RESERVE_PX)));
+  return { map, list };
 }
 
 export default function App() {
+  const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY);
   const [listings, setListings] = useState<ListingWithVotes[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -88,7 +111,7 @@ export default function App() {
   // fresh — using stale state there produced visible jitter.
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const [frameHeight, setFrameHeight] = useState(0);
-  const [sheetState, setSheetState] = useState<SheetState>('collapsed');
+  const [sheetState, setSheetState] = useState<SheetState>('map');
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const dragHeightRef = useRef<number | null>(null);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
@@ -284,7 +307,26 @@ export default function App() {
     return () => resizeObserver.disconnect();
   }, []);
 
-  const sheetSnaps = useMemo(() => computeSheetSnaps(frameHeight), [frameHeight]);
+  // Measures `.sheet-peek-zone` — the drag handle plus, on mobile, either
+  // the hint pill or the compact selected-listing card — so MAP mode's
+  // sheet height is always exactly "whatever's peeking above the map",
+  // never a guessed pixel value. Same component/DOM renders this content in
+  // both modes (see the JSX below), so this one measurement is correct
+  // whichever mode is currently active.
+  const sheetPeekRef = useRef<HTMLDivElement>(null);
+  const [peekHeight, setPeekHeight] = useState(0);
+  useEffect(() => {
+    const el = sheetPeekRef.current;
+    if (!el) return;
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      setPeekHeight(entry.contentRect.height);
+    });
+    resizeObserver.observe(el);
+    setPeekHeight(el.getBoundingClientRect().height);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const sheetSnaps = useMemo(() => computeSheetSnaps(frameHeight, peekHeight), [frameHeight, peekHeight]);
   // While dragging, the finger's raw offset wins; otherwise the current
   // snap state's own height applies (animated via CSS transition — see
   // .list-panel-outer's `dragging` class toggle below, which turns that
@@ -304,8 +346,8 @@ export default function App() {
     if (!drag) return;
     // Moving the finger UP (smaller clientY) should make the sheet taller.
     const deltaY = drag.startY - e.clientY;
-    const minHeight = sheetSnaps.collapsed * 0.7;
-    const maxHeight = sheetSnaps.expanded * 1.04;
+    const minHeight = sheetSnaps.map * 0.85;
+    const maxHeight = sheetSnaps.list * 1.04;
     const nextHeight = Math.max(minHeight, Math.min(maxHeight, drag.startHeight + deltaY));
     dragHeightRef.current = nextHeight;
     setDragHeight(nextHeight);
@@ -317,11 +359,12 @@ export default function App() {
     drag.lastT = now;
   }
 
-  // Nearest-snap-point on release, unless the finger was moving fast enough
-  // to read as a deliberate flick — then it jumps one state further in
-  // that direction even if the released height is still closer to the
-  // state it started from, which is what makes a quick swipe feel
-  // responsive rather than needing to travel the full distance by hand.
+  // Snaps to whichever of the two modes is closer on release, unless the
+  // finger was moving fast enough to read as a deliberate flick — then it
+  // always jumps to the mode in that direction even if the released height
+  // is technically still closer to the mode it started from, which is what
+  // makes a quick swipe feel responsive rather than needing to travel the
+  // full distance by hand.
   function handleSheetDragEnd() {
     const drag = dragStartRef.current;
     if (!drag) return;
@@ -332,17 +375,13 @@ export default function App() {
     dragHeightRef.current = null;
     setDragHeight(null);
 
-    const order: SheetState[] = ['collapsed', 'partial', 'expanded'];
     const FLING_PX_PER_MS = 0.5;
     let next: SheetState;
     if (Math.abs(drag.velocity) > FLING_PX_PER_MS) {
-      const currentIndex = order.indexOf(sheetState);
-      const step = drag.velocity > 0 ? 1 : -1;
-      next = order[Math.max(0, Math.min(order.length - 1, currentIndex + step))];
+      next = drag.velocity > 0 ? 'list' : 'map';
     } else {
-      next = order.reduce((closest, candidate) =>
-        Math.abs(sheetSnaps[candidate] - releasedHeight) < Math.abs(sheetSnaps[closest] - releasedHeight) ? candidate : closest
-      , 'collapsed' as SheetState);
+      const midpoint = (sheetSnaps.map + sheetSnaps.list) / 2;
+      next = releasedHeight > midpoint ? 'list' : 'map';
     }
     setSheetState(next);
   }
@@ -377,16 +416,16 @@ export default function App() {
   // Opens the full ListingDetailModal pinned at the top of the panel on
   // every viewport (mobile included) — .list-panel below already excludes
   // whichever listing is selected, so there's no duplicate card.
+  //
+  // Deliberately never changes `sheetState` — the two mobile towers are
+  // independent of selection. A map-pin tap shows the compact card right
+  // over the map without forcing List mode open; a list-card tap (which can
+  // only happen while already in List mode) just moves that same compact
+  // card to the top of the already-open sheet. See the "peek zone" in the
+  // JSX below, which renders this same compact card in both modes.
   function selectListing(id: string) {
     setSelectedListingId(id);
     setSearchPin(null);
-    // Mobile's bottom sheet defaults to collapsed (~1 card peeking above
-    // the map) — a fresh selection needs at least the "partial" state to
-    // actually show its detail card, otherwise it'd open pinned at the top
-    // of a sheet too short to display it. Only bumps up, never collapses
-    // a sheet the user already had further open. No-op on desktop, which
-    // doesn't read sheetState for anything.
-    setSheetState((prev) => (prev === 'collapsed' ? 'partial' : prev));
     const listing = listings.find((l) => l.id === id);
     if (listing) {
       setFlyToCenter((prev) => ({ center: [listing.longitude, listing.latitude], token: (prev?.token ?? 0) + 1 }));
@@ -420,6 +459,10 @@ export default function App() {
     setPickingLocation(true);
     setPickingSource(source);
     setPickingDialogDismissed(false);
+    // Picking a location fundamentally needs the map visible and tappable —
+    // force MAP mode so LIST mode (where the map is mostly hidden) can't be
+    // left open underneath this flow.
+    setSheetState('map');
     if (current) {
       setSearchPin({ lat: current.lat, lng: current.lon });
       setFlyToCenter((prev) => ({ center: [current.lon, current.lat], token: (prev?.token ?? 0) + 1 }));
@@ -474,7 +517,7 @@ export default function App() {
 
         <div className="map-panel">
           <div
-            className="map-frame"
+            className={`map-frame${isMobile && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}
             ref={mapFrameRef}
             style={frameHeight > 0 ? ({ '--sheet-h': `${appliedSheetHeight}px` } as CSSProperties) : undefined}
           >
@@ -553,30 +596,53 @@ export default function App() {
               >
                 + Add this place
               </div>
-            ) : (
+            ) : !selectedListingId || pickingLocation ? (
+              // Hidden once a listing is selected (and not mid-pick) — the
+              // idle "add a spot" nudge has nothing to do with the selected
+              // listing and, in the tight vertical space MAP mode leaves on
+              // a landscape phone, would otherwise visually collide with
+              // that listing's own map InfoWindow bubble right above it.
               <div className="map-click-hint">
                 {pickingLocation ? 'Click the map, or search a landmark, to place your pin' : 'Click the map to add a spot'}
               </div>
-            )}
+            ) : null}
 
             <div
-              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}`}
+              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}${selectedListingId ? '' : ' no-selection'}`}
               style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
             >
-              <div
-                className="sheet-drag-handle"
-                onPointerDown={handleSheetDragStart}
-                onPointerMove={handleSheetDragMove}
-                onPointerUp={handleSheetDragEnd}
-                onPointerCancel={handleSheetDragEnd}
-                role="button"
-                tabIndex={-1}
-                aria-label="Drag to resize the restaurant list"
-              >
-                <span className="sheet-drag-handle-bar" aria-hidden="true" />
+              <div className="sheet-peek-zone" ref={sheetPeekRef}>
+                <div
+                  className="sheet-drag-handle"
+                  onPointerDown={handleSheetDragStart}
+                  onPointerMove={handleSheetDragMove}
+                  onPointerUp={handleSheetDragEnd}
+                  onPointerCancel={handleSheetDragEnd}
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="Drag to switch between map and list view"
+                >
+                  <span className="sheet-drag-handle-bar" aria-hidden="true" />
+                </div>
+
+                {isMobile ? (
+                  selectedListingId ? (
+                    <ListingDetailModal
+                      ref={coverRef}
+                      compact
+                      listingId={selectedListingId}
+                      onClose={() => setSelectedListingId(null)}
+                      onUpdated={load}
+                    />
+                  ) : (
+                    <button type="button" className="sheet-peek-hint" onClick={() => setSheetState('list')}>
+                      Swipe up to browse restaurants <span aria-hidden="true">▲</span>
+                    </button>
+                  )
+                ) : null}
               </div>
 
-              {selectedListingId ? (
+              {!isMobile && selectedListingId ? (
                 <ListingDetailModal ref={coverRef} listingId={selectedListingId} onClose={() => setSelectedListingId(null)} onUpdated={load} />
               ) : null}
 
