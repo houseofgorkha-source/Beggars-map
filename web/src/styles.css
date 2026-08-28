@@ -122,33 +122,36 @@ body {
 }
 
 /* City selector, text input and search icon combined into one pill so they
-   read as a single search bar rather than three separate controls. */
+   read as a single search bar rather than three separate controls. Sized as
+   the map overlay's dominant, most prominent element — substantially larger
+   than a typical toolbar input — while staying capped so it can't crowd out
+   the Add button on the same row. */
 .search-bar {
-  flex: 0 1 380px;
-  max-width: 62%;
+  flex: 0 1 520px;
+  max-width: 68%;
   display: flex;
   align-items: center;
   background: #fff;
-  border-radius: 9px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
 
 .city-select-inline {
   border: none;
   background: transparent;
-  padding: 8px 6px 8px 12px;
-  font-size: 13px;
+  padding: 14px 8px 14px 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #333;
-  max-width: 130px;
+  max-width: 140px;
   flex-shrink: 0;
 }
 
 .search-bar-divider {
   width: 1px;
   align-self: stretch;
-  margin: 7px 0;
+  margin: 10px 0;
   background: #eee;
   flex-shrink: 0;
 }
@@ -158,8 +161,8 @@ body {
   min-width: 0;
   border: none;
   outline: none;
-  padding: 8px 6px;
-  font-size: 13px;
+  padding: 14px 8px;
+  font-size: 15px;
   background: transparent;
 }
 
@@ -167,7 +170,7 @@ body {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  padding: 0 12px;
+  padding: 0 16px;
   height: 100%;
   color: #ec4899;
   cursor: pointer;
@@ -188,15 +191,6 @@ body {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
-.coming-soon-banner {
-  color: #ec4899;
-  font-weight: 600;
-  font-size: 13px;
-  text-align: center;
-  padding: 8px 16px;
-  flex-shrink: 0;
-}
-
 .main {
   flex: 1;
   display: flex;
@@ -211,11 +205,35 @@ body {
   text-align: center;
 }
 
-.about-panel h1 {
-  font-size: 28px;
+/* The logo mark is the primary visual identity here — larger and first,
+   with the wordmark small beneath it rather than a big text headline
+   carrying the page (the old <h1>). Same block renders in both the desktop
+   sidebar and the About modal (AboutContent is shared), so this styling
+   covers both automatically. */
+.about-logo-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+
+.about-logo-word {
   font-weight: 900;
-  line-height: 1.2;
-  margin: 0 0 14px;
+  font-size: 19px;
+  color: var(--pink-accent);
+  letter-spacing: -0.02em;
+}
+
+/* The desktop/tablet sidebar sits with the topbar's own "B + Beggars Map"
+   mark already visible right above it on screen at all times — showing the
+   logo again here (mark or wordmark) would just repeat it, so the sidebar
+   skips the whole block. The About *modal* (used on mobile, opened as its
+   own separate screen with no topbar visible alongside it) keeps the full
+   mark + wordmark lockup via the unscoped .about-logo-block/.about-logo-word
+   rules above. */
+.about-panel .about-logo-block {
+  display: none;
 }
 
 .about-lead {
@@ -750,10 +768,34 @@ body {
   margin-top: 8px;
 }
 
+/* Groups posted-time + distance together on the left of the footer, same
+   pairing native mobile uses for its own meta row — kept to one line with
+   ellipsis as a safety net on very narrow widths rather than wrapping and
+   pushing the action buttons down. */
+.compact-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .compact-posted {
   color: #aaa;
   font-size: 11px;
   flex-shrink: 0;
+}
+
+.compact-distance {
+  color: #aaa;
+  font-size: 11px;
+}
+
+.compact-distance::before {
+  content: '·';
+  margin-right: 5px;
 }
 
 .compact-actions {
@@ -841,27 +883,55 @@ body {
   background: var(--pink-accent-soft);
 }
 
+/* A compact, consistent price tag rather than a free-floating solid pill —
+   white card, black type, a thin pink border, and a small diamond "tail"
+   pointing at the exact coordinate (::after below) so it reads unambiguously
+   as a pin rather than a generic badge floating near the spot. Brand
+   colors carry the accent (the border/tail) instead of a solid fill, which
+   is what kept the old version feeling like a loud, standalone pill. */
 .map-pin {
-  background: #ec4899;
-  color: #fff;
+  position: relative;
+  background: #fff;
+  color: #0a0a0a;
   font-weight: 700;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 14px;
-  border: 2px solid #fff;
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1.5px solid var(--pink-accent);
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.map-pin::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border-right: 1.5px solid var(--pink-accent);
+  border-bottom: 1.5px solid var(--pink-accent);
+  border-radius: 0 0 2px 0;
+  transform: translateX(-50%) rotate(45deg);
 }
 
 /* The selected listing's own marker — same exact position as always
    (listing.latitude/longitude, never approximated), just visually called
-   out so it's unambiguous which pin the open detail card belongs to. */
+   out (solid pink fill instead of the default's white+outline) so it's
+   unambiguous which pin the open popup belongs to. */
 .map-pin-selected {
-  background: #0a0a0a;
-  border-color: #ec4899;
-  border-width: 3px;
-  box-shadow: 0 0 0 4px rgba(236, 72, 153, 0.35), 0 2px 8px rgba(0, 0, 0, 0.4);
-  transform: scale(1.25);
+  background: var(--pink-accent);
+  color: #fff;
+  border-color: var(--pink-accent);
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.45);
+}
+
+.map-pin-selected::after {
+  background: var(--pink-accent);
+  border-color: var(--pink-accent);
 }
 
 /* A candidate location that isn't (yet) one of our own listings — current
@@ -874,36 +944,68 @@ body {
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
 }
 
-/* Google's InfoWindow wraps our content in its own chrome (`.gm-style-iw-c`
-   bubble + `.gm-style-iw-d` scroll container) that we don't control via a
-   className option — strip its default padding so our summary popup's own
-   layout sits flush instead of double-padded. These class names are part
-   of the Maps JS API's rendered DOM, not ours; Google can adjust this
-   internal markup between releases. */
-.gm-style-iw-c {
-  padding: 0 !important;
-  border-radius: 10px !important;
+/* The map's own popup for the selected listing — plain divs we fully
+   control (see popupTrackerRef/PositionTracker in MapView.tsx), not a
+   Google InfoWindow, specifically so it can sit at a normal z-index as a
+   true sibling of .list-panel-outer instead of nested inside Google's own
+   map panes (which bundle base tiles and every overlay under one shared
+   stacking rank from any sibling's point of view — no z-index there could
+   put a popup above the side panel without the base map tiles coming along
+   with it). `.map-popup-anchor` is positioned via an inline transform set
+   from the tracked pixel coordinates (translate, not left/top, to avoid
+   layout thrash on every pan/zoom frame); `.map-popup-card` then shifts
+   itself up and centered from that anchor point via a second, static
+   transform — kept as two elements so the two transforms don't have to be
+   combined into one dynamically-computed string in JS. */
+.map-popup-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
 }
 
-.gm-style-iw-d {
-  overflow: hidden !important;
+.map-popup-card {
+  position: relative;
+  /* -100% shifts the card fully above the anchor point — which is already
+     the pin's own TOP edge (measured directly from the pin element in
+     MapView.tsx, not the raw map coordinate), so only a small visual gap
+     is needed here, not the pin's full height. */
+  transform: translate(-50%, calc(-100% - 10px));
+  width: 270px;
+  pointer-events: auto;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
 }
 
-.map-summary-popup {
-  padding: 10px 12px;
-  max-width: 200px;
+/* A small pointer tail connecting the card back down to its pin, same
+   construction as .map-pin's own tail below. */
+.map-popup-card::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 13px;
+  height: 13px;
+  background: #fff;
+  border-right: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  border-radius: 0 0 2px 0;
+  transform: translateX(-50%) rotate(45deg);
 }
 
-.map-summary-popup-name {
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.map-summary-popup-note {
-  color: #666;
-  font-size: 12px;
-  margin-top: 4px;
-  line-height: 1.35;
+/* The compact card's own white background/rounded corners/shadow (needed
+   when it's floating directly over the map in the mobile sheet) would
+   double up with .map-popup-card's own matching chrome here — one card
+   visibly nested inside another. The popup card already provides that
+   frame (background/radius/shadow/tail above), so the card inside it is
+   just content. */
+.map-popup-card .listing-cover-compact {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .loading-text {
@@ -998,10 +1100,30 @@ body {
   margin-top: 8px;
 }
 
+.list-card-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
 .list-card-votes {
   display: block;
   color: #888;
   font-size: 12px;
+}
+
+/* Portrait-mobile only (shown in the portrait-only breakpoint below,
+   alongside .list-card-posted) — desktop/tablet/landscape keep their
+   existing look with just the vote count, per "do not change desktop." */
+.list-card-distance {
+  display: none;
+  color: #888;
+  font-size: 12px;
+}
+
+.list-card-distance::before {
+  content: '·';
+  margin-right: 5px;
 }
 
 /* Mobile-web only (shown in the 720px breakpoint below) — desktop keeps
@@ -1452,15 +1574,18 @@ body {
   margin-bottom: 4px;
 }
 
-/* Portrait mobile (narrow width) OR mobile landscape (short height on a
-   touch device) — the same "app becomes a stacked map + bottom sheet"
-   layout applies to both, just with different absolute dimensions.
-   max-width alone can't catch landscape: a rotated phone commonly reports
-   667-932px wide, comfortably above the 720px cutoff, which is exactly
-   how the desktop-oriented .about-panel sidebar was leaking through on
-   rotation. `hover: none` + `pointer: coarse` targets touchscreens
-   specifically (not a desktop browser window resized short), so a real
-   desktop layout is never affected by the height half of this query. */
+/* Phone-class chrome, BOTH orientations — portrait and landscape phones
+   share this tightened header/search-bar/footer treatment. This is
+   deliberately just chrome: it says nothing about how the restaurant list
+   is presented (bottom sheet vs. side panel), which is what genuinely
+   differs by orientation and lives in the two orientation-scoped blocks
+   below instead. max-width alone can't catch landscape: a rotated phone
+   commonly reports 667-932px wide, comfortably above the 720px cutoff,
+   which is exactly how the desktop-oriented .about-panel sidebar used to
+   leak through on rotation. `hover: none` + `pointer: coarse` targets
+   touchscreens specifically (not a desktop browser window resized short),
+   so a real desktop layout is never affected by the height half of this
+   query. */
 @media (max-width: 720px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   .main {
     flex-direction: column;
@@ -1492,20 +1617,16 @@ body {
     padding: 7px 12px;
     font-size: 12px;
   }
-  .coming-soon-banner {
-    padding: 5px 12px;
-    font-size: 11px;
-  }
   .map-panel {
     padding: 10px;
   }
-  /* The search bar's desktop-tuned `max-width: 62%` (in .search-bar
+  /* The search bar's desktop-tuned `max-width: 68%` (in .search-bar
      itself) was crushing the input to a sliver of its already-narrow
-     mobile row, and the row still wrapped the Contribute button onto a
-     second line where it floated loose over the map with no room around
-     it. Un-capping the search bar and keeping the row on one line (its
-     own flex layout — search-bar flex:1, Contribute button auto width —
-     already fits both at 375px+) fixes both at once. */
+     mobile row, and the row still wrapped the Add button onto a second
+     line where it floated loose over the map with no room around it.
+     Un-capping the search bar and keeping the row on one line (its own
+     flex layout — search-bar flex:1, Add button auto width — already fits
+     both at 375px+) fixes both at once. */
   .map-overlay-row {
     flex-wrap: nowrap;
   }
@@ -1513,10 +1634,23 @@ body {
     flex: 1 1 auto;
     max-width: none;
     min-width: 0;
+    border-radius: 12px;
   }
+  /* Still noticeably larger than the pre-redesign 13px/8px pill, but not
+     the full desktop bump — the desktop 14px/15px sizing would eat too much
+     of an already-tight phone header row, especially in landscape where
+     vertical space is the scarce resource. */
   .city-select-inline {
     max-width: 84px;
-    padding-right: 2px;
+    padding: 11px 6px 11px 12px;
+    font-size: 14px;
+  }
+  .search-input-inline {
+    padding: 11px 6px;
+    font-size: 14px;
+  }
+  .search-icon-button {
+    padding: 0 12px;
   }
   .map-overlay-row .contribute-button,
   .map-overlay-row .map-picking-cancel {
@@ -1524,15 +1658,55 @@ body {
     font-size: 13px;
     flex-shrink: 0;
   }
-  /* MAP mode / LIST mode: the two independent towers. Draggable bottom
-     sheet — height is driven by the `--sheet-h` custom property (set
-     inline on .map-frame from App.tsx's sheetState/drag handlers), with a
-     small fallback (just enough for the drag handle) for the brief window
-     before JS has measured the sheet's real content height on first paint.
-     The transition animates snapping between the two modes; the
-     `.sheet-dragging` modifier (added only while a finger/pointer is
-     actually down) turns it off so the sheet tracks the pointer 1:1
-     instead of animating a fresh target on every pointermove. */
+  /* Compact enough that 2-3 listings are visible at once instead of one
+     and a sliver — smaller padding/type. */
+  .list-card {
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    box-shadow: none;
+    border-color: #eee;
+  }
+  .list-card-name {
+    font-size: 14px;
+  }
+  .list-card-footer {
+    margin-top: 5px;
+  }
+  .list-card-posted,
+  .detail-posted {
+    display: block;
+  }
+  /* Compact and clearly out of the way of the map/list — no reason for
+     four lines of link text to compete for scroll space with the actual
+     browsing experience above it. */
+  .footer {
+    padding: 10px 16px;
+    gap: 6px 10px;
+  }
+  .footer-text,
+  .footer-link {
+    font-size: 11px;
+  }
+}
+
+/* PORTRAIT phones only — the two-mode MAP/LIST bottom sheet. Landscape
+   phones/tablets deliberately do NOT get this: see the side-panel block
+   below instead, which treats them more like desktop/tablet per the
+   product decision that a full-screen-map-plus-drag-sheet only makes sense
+   when width is the scarce resource (portrait), not when there's already
+   comfortable side-by-side room (landscape). This query must stay in sync
+   with MOBILE_PORTRAIT_QUERY in App.tsx — same string, same intent — since
+   the JS reads it to decide whether to render the compact card / sheet-peek
+   hint at all. */
+@media (max-width: 720px) and (orientation: portrait) {
+  /* Draggable bottom sheet — height is driven by the `--sheet-h` custom
+     property (set inline on .map-frame from App.tsx's sheetState/drag
+     handlers), with a small fallback (just enough for the drag handle) for
+     the brief window before JS has measured the sheet's real content
+     height on first paint. The transition animates snapping between the
+     two modes; the `.sheet-dragging` modifier (added only while a
+     finger/pointer is actually down) turns it off so the sheet tracks the
+     pointer 1:1 instead of animating a fresh target on every pointermove. */
   .list-panel-outer {
     top: auto;
     left: 0;
@@ -1557,11 +1731,12 @@ body {
     transition: none;
   }
   /* Always in the DOM (see App.tsx) but only interactive/visible here —
-     desktop's side panel has nothing to drag. touch-action: none stops
-     the browser's own scroll/refresh gesture from competing with the
-     pointer handlers while a drag is in progress. A generous invisible
-     hit area (padding) around the visible bar makes it easy to grab
-     without needing to hit a 4px-tall target exactly. */
+     desktop/tablet/landscape all leave this at its base `display: none`
+     since none of them have a sheet to drag. touch-action: none stops the
+     browser's own scroll/refresh gesture from competing with the pointer
+     handlers while a drag is in progress. A generous invisible hit area
+     (padding) around the visible bar makes it easy to grab without needing
+     to hit a 4px-tall target exactly. */
   .sheet-drag-handle {
     display: flex;
     justify-content: center;
@@ -1579,28 +1754,20 @@ body {
     border-radius: 2px;
     background: #ddd;
   }
-  /* Compact enough that 2-3 listings are visible at once instead of one
-     and a sliver — smaller padding/type, and the note clipped to a single
-     line (a full description isn't needed to scan-and-tap a spot). */
-  .list-card {
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    box-shadow: none;
-    border-color: #eee;
-  }
-  .list-card-name {
-    font-size: 14px;
-  }
   /* LIST mode's scrolling cards are deliberately minimal — name, price,
-     vote count, freshness only (the full note/description lives on the one
-     compact card pinned at the top of the sheet, not repeated per row) —
-     so browsing stays dense and scannable rather than each row trying to
-     be a mini detail card. */
+     vote count, distance, freshness only (the full note/description lives
+     on the one compact card pinned at the top of the sheet, not repeated
+     per row) — so browsing stays dense and scannable rather than each row
+     trying to be a mini detail card. Landscape's side panel is roomier and
+     shows notes normally, same as desktop/tablet. */
   .list-card-note {
     display: none;
   }
-  .list-card-footer {
-    margin-top: 5px;
+  /* Distance was previously shown here (matching native mobile's own list)
+     — portrait-only, same as .list-card-posted below, so desktop/tablet/
+     landscape stay exactly as they were. */
+  .list-card-distance {
+    display: inline;
   }
   /* These float relative to the *full* map height (their desktop `bottom`
      values), but the bottom sheet above now covers the bottom of that same
@@ -1624,8 +1791,8 @@ body {
      to the map, which is no longer the active surface a user could tap
      (per the "map effectively gets out of the way" requirement). Without
      this they'd get pushed up near the very top of the frame by the tall
-     --sheet-h and visually collide with the search/Contribute row instead
-     of quietly going away. */
+     --sheet-h and visually collide with the search/Add row instead of
+     quietly going away. */
   .map-frame.list-mode-active .zoom-control,
   .map-frame.list-mode-active .locate-control,
   .map-frame.list-mode-active .map-click-hint {
@@ -1638,35 +1805,40 @@ body {
   .list-panel {
     min-height: 0;
   }
-  .list-card-posted,
-  .detail-posted {
-    display: block;
+}
+
+/* LANDSCAPE phones/tablets — treated like a narrower desktop/tablet: the
+   map stays the full frame with the restaurant list as a floating side
+   panel (the base, non-media .list-panel-outer rule already gives this —
+   position:absolute, anchored top/right/bottom, no bottom-sheet mechanics
+   at all), just narrower than desktop/tablet's 340px+ so it doesn't
+   dominate a comparatively narrow 667-932px-wide frame. `min-height: 501px`
+   is deliberately absent here (unlike the tablet queries) — this query
+   only ever matches short (<=500px tall) touch viewports, which is exactly
+   the phone-landscape case tablet's own queries exclude. */
+@media (hover: none) and (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
+  .list-panel-outer {
+    width: clamp(230px, 42vw, 320px);
+    max-width: calc(100% - 20px);
   }
-  /* Compact and clearly out of the way of the map/list — no reason for
-     four lines of link text to compete for scroll space with the actual
-     browsing experience above it. */
-  .footer {
-    padding: 10px 16px;
-    gap: 6px 10px;
-  }
-  .footer-text,
-  .footer-link {
-    font-size: 11px;
+  /* Chosen over the tagline/banner's own vertical space, same trade-off as
+     the block below — a phone-landscape side panel still needs to fit
+     comfortably in as little as ~375px of total viewport height. */
+  .list-panel {
+    min-height: 60px;
   }
 }
 
-/* Mobile landscape specifically — on top of the shared block above. Height
-   is the scarce resource here (as little as 375px total), not width, so
-   this reclaims vertical space by hiding secondary chrome rather than
-   shrinking anything readable further (fonts/cards stay at the portrait
-   sizes set above). */
+/* Mobile landscape specifically — on top of the blocks above. Height is
+   the scarce resource here (as little as 375px total), not width, so this
+   reclaims vertical space by hiding secondary chrome rather than shrinking
+   anything readable further (fonts/cards stay at the sizes set above). */
 @media (hover: none) and (pointer: coarse) and (max-height: 500px) {
-  /* The tagline and promo banner are the two lines with the least
-     information density on screen — cutting them (not shrinking them)
-     buys back a full row of height for the map/list without touching any
-     control a user actually needs (About Us itself stays reachable). */
-  .brand-sub,
-  .coming-soon-banner {
+  /* The tagline is the lowest-information-density line on screen —
+     cutting it (not shrinking it) buys back vertical space for the
+     map/list without touching any control a user actually needs (About Us
+     itself stays reachable). */
+  .brand-sub {
     display: none;
   }
   .topbar {
@@ -1681,15 +1853,20 @@ body {
   }
 }
 
-/* Desktop/laptop only — a smaller, denser rendering of the selected
-   listing's detail card so it takes up less of the side panel and more
-   of the restaurant list stays visible/scrollable underneath it. Scoped
-   to .listing-cover specifically (not .modal-header/.modal-body/etc.
-   generally) since those class names are shared with the Add Listing
-   modal, which should stay exactly as-is. Left untouched on mobile,
-   where .listing-cover already shrinks under the bottom sheet's own
-   space pressure instead (see .list-panel's min-height above). */
-@media (min-width: 721px) {
+/* Desktop/laptop/tablet AND phone landscape — a smaller, denser rendering
+   of the selected listing's detail card so it takes up less of the side
+   panel and more of the restaurant list stays visible/scrollable underneath
+   it. Scoped to .listing-cover specifically (not .modal-header/.modal-body/
+   etc. generally) since those class names are shared with the Add Listing
+   modal, which should stay exactly as-is. Phone landscape is included here
+   (not just min-width: 721px) because it now uses this same side-panel
+   treatment instead of the bottom sheet — including narrow landscape
+   widths like 667px that would otherwise miss the min-width cutoff. Left
+   untouched on portrait mobile, where .listing-cover only ever renders in
+   its `compact` variant instead (a completely different layout, unrelated
+   to these rules) — see .list-panel's min-height in the portrait-only
+   block above. */
+@media (min-width: 721px), (hover: none) and (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
   .listing-cover .modal-header {
     padding: 10px 14px;
   }

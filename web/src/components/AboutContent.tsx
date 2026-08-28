@@ -1,7 +1,12 @@
+import Logo from './Logo';
+
 export default function AboutContent() {
   return (
     <>
-      <h1>About Beggars Map</h1>
+      <div className="about-logo-block">
+        <Logo size={60} />
+        <span className="about-logo-word">Beggars Map</span>
+      </div>
       <p className="about-lead">A community of people who know that a great meal doesn't have to cost a fortune. Every listing is ₹100 or less.</p>
       <p className="about-body">We call ourselves the Beggars because we believe in asking a simple question: <strong>where does ₹100 go furthest?</strong></p>
       <p className="about-body">Bengaluru is full of places serving honest, satisfying food at prices that make sense. The problem isn't always finding food. It's finding the <strong>good stuff</strong> without spending half your wallet discovering it.</p>

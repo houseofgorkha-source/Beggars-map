@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMapId, hasGoogleMapsKey, loadMapsLibrary, loadMarkerLibrary } from '../lib/googleMaps';
+import ListingDetailModal from './ListingDetailModal';
 import type { Listing } from '../types';
 
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 }; // Bengaluru
@@ -20,6 +21,18 @@ type Props = {
   // the open detail card belongs to, at the exact same lat/lng every other
   // marker for that listing already uses (no separate/approximate position).
   selectedListingId?: string | null;
+  // Closes the popup card (its own ✕, report/vote/delete flows use this to
+  // report back up) — App.tsx wires this to the same "return to home" reset
+  // every other close action uses.
+  onClosePopup?: () => void;
+  // Forwarded to the popup card's onUpdated (vote/delete change the
+  // listing) so the caller's own listings reload the same way it already
+  // does for the side-panel's card.
+  onListingUpdated?: () => void;
+  // True on portrait mobile only, where App.tsx already renders this exact
+  // same compact card in its own bottom-sheet peek zone — showing it a
+  // second time, anchored to the pin, would just duplicate that.
+  hidePopup?: boolean;
 };
 
 export default function MapView({
@@ -30,13 +43,34 @@ export default function MapView({
   flyToCenter,
   searchPin,
   selectedListingId,
+  onClosePopup,
+  onListingUpdated,
+  hidePopup,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const userMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const searchPinMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
-  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  // Tracks the selected listing's on-screen pixel position (see the popup
+  // effect below) so the popup can be a plain div we fully control —
+  // deliberately NOT a Google InfoWindow. InfoWindow content renders inside
+  // Google's own nested map panes, which bundle the base map tiles and every
+  // overlay under one shared stacking rank from any *sibling* element's
+  // point of view (like .list-panel-outer) — there is no z-index that puts
+  // an InfoWindow above the side panel without also putting the base map
+  // tiles above it, which would break the "panel floats over the map" look
+  // entirely. A plain sibling div has no such bundling problem.
+  const popupTrackerListenersRef = useRef<google.maps.MapsEventListener[]>([]);
+  const popupRafRef = useRef<number | null>(null);
+  // The selected listing's own pin content element (set in the markers
+  // effect below) — the popup's position is measured directly from this via
+  // getBoundingClientRect() rather than recomputed independently through
+  // Google's Projection API, which is what AdvancedMarkerElement itself
+  // already uses internally to position this exact element correctly. That
+  // sidesteps needing our own lat/lng-to-pixel math to agree with Google's.
+  const selectedMarkerElRef = useRef<HTMLDivElement | null>(null);
+  const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const hasFitInitialBoundsRef = useRef(false);
 
@@ -154,8 +188,12 @@ export default function MapView({
       markersRef.current = [];
       userMarkerRef.current = null;
       searchPinMarkerRef.current = null;
-      infoWindowRef.current?.close();
-      infoWindowRef.current = null;
+      popupTrackerListenersRef.current.forEach((l) => l.remove());
+      popupTrackerListenersRef.current = [];
+      if (popupRafRef.current != null) cancelAnimationFrame(popupRafRef.current);
+      popupRafRef.current = null;
+      selectedMarkerElRef.current = null;
+      setPopupPosition(null);
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,6 +213,7 @@ export default function MapView({
 
       markersRef.current.forEach((m) => (m.map = null));
       markersRef.current = [];
+      selectedMarkerElRef.current = null;
 
       listings.forEach((listing) => {
         const isSelected = listing.id === selectedListingId;
@@ -185,6 +224,7 @@ export default function MapView({
           e.stopPropagation();
           onSelectListing(listing.id);
         });
+        if (isSelected) selectedMarkerElRef.current = el;
 
         const marker = new AdvancedMarkerElement({
           map,
@@ -288,52 +328,66 @@ export default function MapView({
     };
   }, [searchPin, mapLoading]);
 
-  // A lean summary popup at the selected listing's own pin — name, price,
-  // note. This is deliberately not the full detail card (photo, vote,
-  // directions, report all live in the sidebar's .listing-cover already);
-  // it's just enough to identify the spot right where it's pinned on the
-  // map, same as tapping any other location would show a summary there.
+  // The selected listing's own popup, right at its pin — the exact same
+  // compact card used everywhere else in the app (name, price, note,
+  // freshness, vote, directions, report). Positioned by directly measuring
+  // the selected marker's own pin element (selectedMarkerElRef, set in the
+  // markers effect above) via getBoundingClientRect() — deliberately not
+  // Google's Projection API (fromLatLngToDivPixel), which proved unreliable
+  // here (empirically returning (0,0)-ish for coordinates that very much
+  // aren't at the map's origin, independent of raster/vector rendering
+  // mode). AdvancedMarkerElement already positions the pin correctly via
+  // whatever internal mechanism Google uses, so measuring its real rendered
+  // position sidesteps needing our own projection math to agree with it.
+  // Re-measures every animation frame while a popup is open — pan/zoom
+  // isn't accompanied by a discrete "moved" event we can rely on (the pin
+  // itself just glides continuously), so this is what keeps the popup
+  // glued to it. Skipped on portrait mobile (hidePopup) — App.tsx already
+  // shows this same card in its bottom-sheet peek zone there, so a second
+  // copy anchored to the pin would just be a duplicate.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || mapLoading) return;
 
-    infoWindowRef.current?.close();
-    infoWindowRef.current = null;
+    if (popupRafRef.current != null) cancelAnimationFrame(popupRafRef.current);
+    popupRafRef.current = null;
+    setPopupPosition(null);
 
+    if (hidePopup) return;
     const listing = listings.find((l) => l.id === selectedListingId);
     if (!listing) return;
 
-    let cancelled = false;
-    (async () => {
-      const { InfoWindow } = await loadMapsLibrary();
-      if (cancelled) return;
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
 
-      const root = document.createElement('div');
-      root.className = 'map-summary-popup';
-
-      const name = document.createElement('div');
-      name.className = 'map-summary-popup-name';
-      // textContent, not innerHTML — listing.name/note are user-submitted.
-      name.textContent = `${listing.name} — ₹${listing.price_rupees}`;
-      root.appendChild(name);
-
-      if (listing.note) {
-        const note = document.createElement('div');
-        note.className = 'map-summary-popup-note';
-        note.textContent = listing.note;
-        root.appendChild(note);
+    function measure() {
+      const pinEl = selectedMarkerElRef.current;
+      if (pinEl && containerEl) {
+        const pinRect = pinEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        setPopupPosition({
+          x: pinRect.left + pinRect.width / 2 - containerRect.left,
+          // Google's InfoWindow used to auto-pan the map so a popup near the
+          // viewport edge always stayed fully visible — a plain positioned
+          // div has no equivalent, so a pin close to the top of a short
+          // frame (routine in mobile-landscape, where the whole frame can
+          // be well under 400px tall) could otherwise open the card
+          // underneath the search bar. Clamping to a minimum keeps the
+          // whole card below that row; the tail just won't perfectly meet
+          // the pin in that specific case, which is a minor, rare tradeoff
+          // against actually being obscured.
+          y: Math.max(pinRect.top - containerRect.top, 190),
+        });
       }
-
-      const infoWindow = new InfoWindow({ content: root, maxWidth: 220 });
-      infoWindow.setPosition({ lat: listing.latitude, lng: listing.longitude });
-      infoWindow.open({ map });
-      infoWindowRef.current = infoWindow;
-    })();
+      popupRafRef.current = requestAnimationFrame(measure);
+    }
+    popupRafRef.current = requestAnimationFrame(measure);
 
     return () => {
-      cancelled = true;
+      if (popupRafRef.current != null) cancelAnimationFrame(popupRafRef.current);
+      popupRafRef.current = null;
     };
-  }, [listings, selectedListingId, mapLoading]);
+  }, [listings, selectedListingId, mapLoading, hidePopup]);
 
   const zoomBy = useCallback((delta: number) => {
     const map = mapRef.current;
@@ -444,6 +498,19 @@ export default function MapView({
             {locating ? <span className="spinner spinner-small" aria-hidden="true" /> : '◎'}
           </button>
           {locateError ? <div className="locate-error">{locateError}</div> : null}
+        </div>
+      ) : null}
+
+      {popupPosition && selectedListingId ? (
+        <div className="map-popup-anchor" style={{ transform: `translate(${popupPosition.x}px, ${popupPosition.y}px)` }}>
+          <div className="map-popup-card">
+            <ListingDetailModal
+              compact
+              listingId={selectedListingId}
+              onClose={() => onClosePopup?.()}
+              onUpdated={onListingUpdated}
+            />
+          </div>
         </div>
       ) : null}
     </div>

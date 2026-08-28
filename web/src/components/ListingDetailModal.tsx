@@ -7,10 +7,19 @@ type Props = {
   listingId: string;
   onClose: () => void;
   onUpdated?: () => void;
-  // Mobile-web's "tiny complete card" layout — same data/handlers as the
-  // desktop card below, just a wholly different (much smaller) render path.
-  // Never true on desktop/tablet — see the `isMobile` gate in App.tsx.
+  // The tiny complete card layout — same data/handlers as the desktop card
+  // below, just a wholly different (much smaller) render path. Used for
+  // portrait mobile's bottom-sheet card (gated by `isMobilePortrait` in
+  // App.tsx) AND, on every other viewport, as the content of the map's own
+  // marker popup (see MapView.tsx) — the same compact card either way, just
+  // hosted in two different containers.
   compact?: boolean;
+  // Distance from the user's own location, in km — computed by the caller
+  // (App.tsx, from navigator.geolocation) since this component only knows
+  // its own listingId, not the viewer's position. null/undefined (no
+  // location permission, or not passed at all) simply omits it, same as
+  // native mobile's own graceful fallback.
+  distanceKm?: number | null;
 };
 
 const REPORT_REASONS = ["Closed / doesn't exist", 'Wrong price', 'Inappropriate photo', 'Spam or duplicate'];
@@ -49,7 +58,7 @@ function TrashIcon() {
 // ResizeObserver) to size the collapsed "map mode" sheet height around the
 // compact card's real rendered content.
 const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDetailModal(
-  { listingId, onClose, onUpdated, compact },
+  { listingId, onClose, onUpdated, compact, distanceKm },
   ref
 ) {
   const [listing, setListing] = useState<Listing | null>(null);
@@ -214,7 +223,10 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
         </div>
 
         <div className="compact-footer">
-          <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
+          <span className="compact-meta">
+            <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
+            {distanceKm != null ? <span className="compact-distance">{distanceKm.toFixed(1)} km away</span> : null}
+          </span>
           <div className="compact-actions">
             <button className={`compact-vote ${hasVoted ? 'active' : ''}`} onClick={toggleVote} aria-label="Worth it">
               ▲ {voteCount}

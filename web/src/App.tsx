@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
 import { formatRelativeTime } from './lib/relativeTime';
+import { distanceKm } from './lib/distance';
 import MapView from './components/MapView';
 import Logo from './components/Logo';
 import AddListingModal from './components/AddListingModal';
@@ -13,15 +14,22 @@ import AboutModal from './components/AboutModal';
 import type { Listing } from './types';
 
 type ListingWithVotes = Listing & { voteCount: number };
+// Mirrors native mobile's own ListingWithDistance (src/screens/MapScreen.tsx)
+// — distance is computed client-side from the user's own location, so it's
+// a derived layer on top of the fetched listings rather than part of what
+// `load()` fetches.
+type ListingWithDistance = ListingWithVotes & { distanceKm: number | null };
 
 const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'];
 
-// Mirrors styles.css's combined mobile media query (portrait width OR
-// mobile landscape — a rotated phone commonly reports widths well above
-// 720px, which plain width-based JS checks below used to miss). Kept as
-// one shared string so the CSS and JS "is this mobile?" answers can't
-// drift apart.
-const MOBILE_MEDIA_QUERY = '(max-width: 720px), (hover: none) and (pointer: coarse) and (max-height: 500px)';
+// Portrait phones only — landscape phones/tablets deliberately use the
+// desktop-style side panel instead of the MAP/LIST bottom sheet (see the
+// "LANDSCAPE phones/tablets" block in styles.css), so this must stay
+// narrower than a bare max-width check. Mirrors styles.css's own
+// `@media (max-width: 720px) and (orientation: portrait)` block — kept as
+// one shared string so the CSS and JS "is this the sheet experience?"
+// answers can't drift apart.
+const MOBILE_PORTRAIT_QUERY = '(max-width: 720px) and (orientation: portrait)';
 
 // Two independent interaction modes, not a continuum: MAP mode (default —
 // the map fills the screen, the sheet is shrunk to just its drag handle
@@ -64,7 +72,7 @@ function computeSheetSnaps(containerHeight: number, peekContentHeight: number) {
 }
 
 export default function App() {
-  const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY);
+  const isMobilePortrait = useMediaQuery(MOBILE_PORTRAIT_QUERY);
   const [listings, setListings] = useState<ListingWithVotes[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -145,6 +153,21 @@ export default function App() {
   // just hides the card; reset to false every time picking starts so it
   // reliably reappears on the next pick rather than staying dismissed.
   const [pickingDialogDismissed, setPickingDialogDismissed] = useState(false);
+  // Mirrors native mobile's own auto-request-on-mount pattern (MapScreen.tsx):
+  // best-effort, silent — a denied/unavailable permission just leaves this
+  // null forever and every listing's distanceKm stays null too (nothing
+  // shown), same as native's own graceful fallback. Independent of the
+  // "Locate me" button on the map itself (MapView.tsx's own locateMe), which
+  // recenters the camera and isn't touched by this.
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => {}
+    );
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -163,6 +186,19 @@ export default function App() {
     load();
   }, [load]);
 
+  // Distance is a derived layer on top of the fetched listings — recomputed
+  // whenever either the listings or the user's own location changes, not
+  // baked into `load()` itself (userLocation usually resolves asynchronously
+  // after the first load already happened).
+  const listingsWithDistance: ListingWithDistance[] = useMemo(
+    () =>
+      listings.map((l) => ({
+        ...l,
+        distanceKm: userLocation ? distanceKm(userLocation.lat, userLocation.lon, l.latitude, l.longitude) : null,
+      })),
+    [listings, userLocation]
+  );
+
   // Memoized so this array's identity only changes when listings or the
   // query actually change — MapView re-fits the camera to it whenever the
   // reference changes, so a stable reference across unrelated re-renders
@@ -171,8 +207,8 @@ export default function App() {
   // before the search effect below, which reads filtered.length to decide
   // whether an external search is even needed.
   const filtered = useMemo(
-    () => listings.filter((l) => l.name.toLowerCase().includes(query.toLowerCase())),
-    [listings, query]
+    () => listingsWithDistance.filter((l) => l.name.toLowerCase().includes(query.toLowerCase())),
+    [listingsWithDistance, query]
   );
 
   // Landmark search on the browse map — separate from the substring filter
@@ -266,10 +302,14 @@ export default function App() {
 
   // Keeps .list-panel-outer's top edge glued to the overlay row's actual
   // rendered bottom edge — recomputed on resize/wrap (the row can go from
-  // one line to two on narrow desktop widths, or the Contribute/Cancel
-  // swap can change its width) rather than assumed from a fixed height.
+  // one line to two on narrow desktop widths, or the Add/Cancel swap can
+  // change its width) rather than assumed from a fixed height. Only
+  // portrait phones skip this (their sheet is bottom-anchored, unrelated to
+  // the row's position) — landscape phones now use the same measured
+  // side-panel positioning as desktop/tablet, same as this effect already
+  // provides.
   useEffect(() => {
-    const mq = window.matchMedia(MOBILE_MEDIA_QUERY);
+    const mq = window.matchMedia(MOBILE_PORTRAIT_QUERY);
     function measure() {
       if (mq.matches) {
         setSidePanelTop(null);
@@ -432,20 +472,92 @@ export default function App() {
     }
   }
 
-  function handlePosted() {
+  // The single source of truth for "close every internal view and return to
+  // the plain browsing map" — used by every close/cancel action (Add
+  // Listing's own ✕, the Legal/About modals, deselecting a listing) AND by
+  // the browser-back handler below, so there is exactly one definition of
+  // what "home" means and every path back to it behaves identically. Only
+  // ever built from useState setters (all stable references), so it's safe
+  // to close over from an effect with an empty dependency array below.
+  const resetToHome = useCallback(() => {
     setShowAdd(false);
     setAddInitialCoords(undefined);
     setPickedLocation(null);
     setPickingLocation(false);
     setPickingDialogDismissed(false);
     setSearchPin(null);
+    setLegalTab(null);
+    setShowAbout(false);
+    setSelectedListingId(null);
+  }, []);
+
+  // Whether the app is currently showing anything other than the plain
+  // browsing map — every one of these is a distinct "internal view" a
+  // browser back-press or edge-swipe should close rather than exiting the
+  // site. Deliberately excludes lighter-weight, transient UI (the search
+  // results dropdown, a report popover) — those aren't "views" a user would
+  // expect a back-press to navigate out of.
+  const hasOpenState = showAdd || legalTab !== null || showAbout || selectedListingId !== null;
+
+  // Keeps one browser-history entry in sync with hasOpenState so back/
+  // side-swipe closes an internal view instead of leaving the site — this
+  // app has no router and never touched the History API before, so by
+  // default *every* back-press just left beggarsmap.com entirely, including
+  // from mid-flow (Add Listing open, a listing selected, etc.).
+  //
+  // The approach: push exactly one entry the moment something opens (the
+  // false -> true transition of hasOpenState, not one push per nested
+  // change — opening Legal while Add is already open doesn't push a
+  // second entry). Closing that state through the UI (an X button, Cancel,
+  // successful submit) consumes that same entry via history.back() so the
+  // stack never grows unboundedly. Actually pressing back/side-swiping
+  // fires `popstate`, which isPoppingRef distinguishes from a UI-triggered
+  // close so the sync effect below doesn't call history.back() a second
+  // time in response to the browser's own navigation — that double-call was
+  // the exact bug being fixed: it would consume the pushed entry via the
+  // popstate-driven reset, then this effect's own (redundant) history.back()
+  // would consume one entry *too many*, landing on whatever real page was
+  // open before this site — i.e. still exiting it, just one press later.
+  const isPoppingRef = useRef(false);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    function handlePopState() {
+      isPoppingRef.current = true;
+      resetToHome();
+    }
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [resetToHome]);
+
+  useEffect(() => {
+    if (hasOpenState && !wasOpenRef.current) {
+      window.history.pushState({ beggarsMapOpen: true }, '');
+    } else if (!hasOpenState && wasOpenRef.current) {
+      if (isPoppingRef.current) {
+        isPoppingRef.current = false;
+      } else if (window.history.state?.beggarsMapOpen) {
+        window.history.back();
+      }
+    }
+    wasOpenRef.current = hasOpenState;
+  }, [hasOpenState]);
+
+  function handlePosted() {
+    resetToHome();
     load();
   }
 
-  // Clicking empty map no longer opens Add Listing instantly — it drops a
-  // pin and swaps the hint pill into a dedicated "+ Add this place" button,
-  // so a stray/misplaced tap doesn't immediately launch the form.
+  // A plain map click is browsing, not adding — it must never drop a
+  // candidate pin or surface "+ Add this place" on its own. Placing a pin
+  // by tapping the map is only meaningful once the user has explicitly
+  // entered the picking sub-flow (via AddListingModal's "Pick on map" /
+  // "Use current location", which is what sets pickingLocation), so a raw
+  // click outside that flow is a no-op here and Google's own default map
+  // interaction (pan handled natively, click otherwise ignored) is all
+  // that happens.
   function handleMapClick(latitude: number, longitude: number) {
+    if (!pickingLocation) return;
     setSearchPin({ lat: latitude, lng: longitude });
   }
 
@@ -495,6 +607,17 @@ export default function App() {
     setSearchPin(null);
   }
 
+  // Only portrait mobile's sheet-peek zone ever renders a full detail card
+  // above the list — desktop/tablet/landscape now show that same
+  // information via MapView's own map-anchored popup instead (see
+  // `hidePopup` on MapView above), so pinning a second copy at the top of
+  // the list panel would just duplicate it — and, worse, could visually
+  // overlap the map popup for a listing whose pin sits near the panel.
+  // Drives `.list-panel-outer`'s `no-selection` class (padding-top for the
+  // list when nothing is pinned above it) — true whenever no cover card is
+  // actually being rendered there, not just when nothing is selected.
+  const showsCoverCard = isMobilePortrait && selectedListingId !== null;
+
   return (
     <div className="app">
       <header className="topbar">
@@ -508,8 +631,6 @@ export default function App() {
         <button className="about-button" onClick={() => setShowAbout(true)}>About Us</button>
       </header>
 
-      <div className="coming-soon-banner">Launching soon in all other major cities</div>
-
       <main className="main">
         <section className="about-panel">
           <AboutContent />
@@ -517,7 +638,7 @@ export default function App() {
 
         <div className="map-panel">
           <div
-            className={`map-frame${isMobile && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}
+            className={`map-frame${isMobilePortrait && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}
             ref={mapFrameRef}
             style={frameHeight > 0 ? ({ '--sheet-h': `${appliedSheetHeight}px` } as CSSProperties) : undefined}
           >
@@ -529,6 +650,9 @@ export default function App() {
               flyToCenter={flyToCenter ?? undefined}
               searchPin={searchPin}
               selectedListingId={pickingLocation ? null : selectedListingId}
+              onClosePopup={resetToHome}
+              onListingUpdated={load}
+              hidePopup={isMobilePortrait || pickingLocation}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -562,7 +686,7 @@ export default function App() {
               {pickingLocation ? (
                 <button className="secondary-button map-picking-cancel picking-fade-in" onClick={cancelPickingLocation}>Cancel</button>
               ) : (
-                <button className="primary-button contribute-button" onClick={() => setShowAdd(true)}>+ Contribute</button>
+                <button className="primary-button contribute-button" onClick={() => setShowAdd(true)}>+ Add</button>
               )}
             </div>
 
@@ -596,19 +720,15 @@ export default function App() {
               >
                 + Add this place
               </div>
-            ) : !selectedListingId || pickingLocation ? (
-              // Hidden once a listing is selected (and not mid-pick) — the
-              // idle "add a spot" nudge has nothing to do with the selected
-              // listing and, in the tight vertical space MAP mode leaves on
-              // a landscape phone, would otherwise visually collide with
-              // that listing's own map InfoWindow bubble right above it.
-              <div className="map-click-hint">
-                {pickingLocation ? 'Click the map, or search a landmark, to place your pin' : 'Click the map to add a spot'}
-              </div>
+            ) : pickingLocation ? (
+              // Only ever shown mid-pick (see handleMapClick above) — outside
+              // that explicit flow, clicking the map does nothing, so there
+              // is nothing to hint at.
+              <div className="map-click-hint">Click the map, or search a landmark, to place your pin</div>
             ) : null}
 
             <div
-              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}${selectedListingId ? '' : ' no-selection'}`}
+              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}${showsCoverCard ? '' : ' no-selection'}`}
               style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
             >
               <div className="sheet-peek-zone" ref={sheetPeekRef}>
@@ -625,13 +745,14 @@ export default function App() {
                   <span className="sheet-drag-handle-bar" aria-hidden="true" />
                 </div>
 
-                {isMobile ? (
+                {isMobilePortrait ? (
                   selectedListingId ? (
                     <ListingDetailModal
                       ref={coverRef}
                       compact
                       listingId={selectedListingId}
-                      onClose={() => setSelectedListingId(null)}
+                      distanceKm={listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null}
+                      onClose={resetToHome}
                       onUpdated={load}
                     />
                   ) : (
@@ -641,10 +762,6 @@ export default function App() {
                   )
                 ) : null}
               </div>
-
-              {!isMobile && selectedListingId ? (
-                <ListingDetailModal ref={coverRef} listingId={selectedListingId} onClose={() => setSelectedListingId(null)} onUpdated={load} />
-              ) : null}
 
               <aside className="list-panel" ref={listPanelRef}>
                 {loading && listings.length === 0 ? (
@@ -690,7 +807,12 @@ export default function App() {
                       </div>
                       {listing.note ? <p className="list-card-note">{listing.note}</p> : null}
                       <div className="list-card-footer">
-                        <span className="list-card-votes">▲ {listing.voteCount}</span>
+                        <span className="list-card-meta">
+                          <span className="list-card-votes">▲ {listing.voteCount}</span>
+                          {listing.distanceKm != null ? (
+                            <span className="list-card-distance">{listing.distanceKm.toFixed(1)} km away</span>
+                          ) : null}
+                        </span>
                         <span className="list-card-posted">{formatRelativeTime(listing.created_at)}</span>
                       </div>
                     </div>
@@ -713,14 +835,7 @@ export default function App() {
 
       {showAdd ? (
         <AddListingModal
-          onClose={() => {
-            setShowAdd(false);
-            setAddInitialCoords(undefined);
-            setPickedLocation(null);
-            setPickingLocation(false);
-            setPickingDialogDismissed(false);
-            setSearchPin(null);
-          }}
+          onClose={resetToHome}
           onPosted={handlePosted}
           initialCoords={addInitialCoords}
           onPickOnMap={startPickingLocation}
@@ -728,8 +843,8 @@ export default function App() {
           hidden={pickingLocation}
         />
       ) : null}
-      {legalTab ? <LegalModal initialTab={legalTab} onClose={() => setLegalTab(null)} /> : null}
-      {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
+      {legalTab ? <LegalModal initialTab={legalTab} onClose={resetToHome} /> : null}
+      {showAbout ? <AboutModal onClose={resetToHome} /> : null}
     </div>
   );
 }
