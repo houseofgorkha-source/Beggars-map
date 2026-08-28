@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Camera, Map, Marker, UserLocation } from '@maplibre/maplibre-react-native';
-import type { PressEvent } from '@maplibre/maplibre-react-native';
+import type { CameraRef, PressEvent } from '@maplibre/maplibre-react-native';
 import type { NativeSyntheticEvent } from 'react-native';
 import { boundsForPoints, vectorStyleUrl } from '../lib/olaMaps';
 import type { Listing } from '../types/database';
@@ -10,11 +10,23 @@ type Props = {
   listings: Listing[];
   onSelectListing: (listingId: string) => void;
   onLongPress?: (latitude: number, longitude: number) => void;
+  flyToCenter?: { latitude: number; longitude: number; token: number };
 };
 
-export default function ListingsMap({ listings, onSelectListing, onLongPress }: Props) {
+export default function ListingsMap({ listings, onSelectListing, onLongPress, flyToCenter }: Props) {
   const styleUrl = vectorStyleUrl();
+  const cameraRef = useRef<CameraRef>(null);
   const bounds = useMemo(() => boundsForPoints(listings.map((l) => ({ latitude: l.latitude, longitude: l.longitude }))), [listings]);
+
+  useEffect(() => {
+    if (!flyToCenter) return;
+    cameraRef.current?.flyTo({
+      center: [flyToCenter.longitude, flyToCenter.latitude],
+      zoom: 15,
+      duration: 1200,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToCenter?.token]);
 
   if (!styleUrl) {
     return (
@@ -38,6 +50,7 @@ export default function ListingsMap({ listings, onSelectListing, onLongPress }: 
       }
     >
       <Camera
+        ref={cameraRef}
         initialViewState={
           bounds
             ? { bounds, padding: { left: 40, right: 40, top: 40, bottom: 40 } }
@@ -66,7 +79,7 @@ const styles = StyleSheet.create({
   missingKey: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#f2f2f2', padding: 16 },
   missingKeyText: { color: '#888', textAlign: 'center' },
   pin: {
-    backgroundColor: '#0a7d3c',
+    backgroundColor: '#ec4899',
     borderRadius: 14,
     paddingHorizontal: 8,
     paddingVertical: 4,

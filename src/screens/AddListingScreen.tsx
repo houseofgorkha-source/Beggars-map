@@ -1,16 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -18,7 +7,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
-import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
 import type { RootStackParamList } from '../navigation/types';
@@ -38,11 +26,6 @@ export default function AddListingScreen() {
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const [placeQuery, setPlaceQuery] = useState('');
-  const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
-  const [searchingPlaces, setSearchingPlaces] = useState(false);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
 
@@ -55,33 +38,6 @@ export default function AddListingScreen() {
       }
     }, [params?.pickedLatitude, params?.pickedLongitude, navigation])
   );
-
-  useEffect(() => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    if (!placeQuery.trim()) {
-      setPlaceResults([]);
-      return;
-    }
-    searchDebounce.current = setTimeout(async () => {
-      setSearchingPlaces(true);
-      const results = await searchPlaces(
-        placeQuery,
-        coords ? { latitude: coords.lat, longitude: coords.lon } : undefined
-      );
-      setPlaceResults(results);
-      setSearchingPlaces(false);
-    }, 400);
-    return () => {
-      if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    };
-  }, [placeQuery]);
-
-  function selectPlace(place: PlaceSuggestion) {
-    setCoords({ lat: place.latitude, lon: place.longitude });
-    if (!name.trim()) setName(place.name);
-    setPlaceQuery('');
-    setPlaceResults([]);
-  }
 
   async function useCurrentLocation() {
     setLocating(true);
@@ -247,33 +203,6 @@ export default function AddListingScreen() {
         </Pressable>
       </View>
 
-      <Text style={styles.sublabel}>Search by name</Text>
-      <TextInput
-        style={styles.input}
-        value={placeQuery}
-        onChangeText={setPlaceQuery}
-        placeholder="Search for the place on the map"
-      />
-      {searchingPlaces ? <ActivityIndicator style={styles.searchSpinner} /> : null}
-      {placeResults.length > 0 ? (
-        <FlatList
-          data={placeResults}
-          keyExtractor={(item) => item.placeId}
-          style={styles.resultsList}
-          scrollEnabled={false}
-          renderItem={({ item }) => (
-            <Pressable style={styles.resultRow} onPress={() => selectPlace(item)}>
-              <Text style={styles.resultName}>{item.name}</Text>
-              {item.address ? (
-                <Text style={styles.resultAddress} numberOfLines={1}>
-                  {item.address}
-                </Text>
-              ) : null}
-            </Pressable>
-          )}
-        />
-      ) : null}
-
       <Text style={styles.sublabel}>Or paste a Google Maps link</Text>
       <View style={styles.linkRow}>
         <TextInput
@@ -321,13 +250,13 @@ const styles = StyleSheet.create({
   photoButtonText: { color: '#888' },
   photoPreview: { width: '100%', height: '100%' },
   pinnedBanner: {
-    backgroundColor: '#eaf6ee',
+    backgroundColor: '#fce9f2',
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginBottom: 8,
   },
-  pinnedBannerText: { color: '#0a7d3c', fontWeight: '600' },
+  pinnedBannerText: { color: '#ec4899', fontWeight: '600' },
   locationRow: { flexDirection: 'row', gap: 10 },
   locationButton: {
     flex: 1,
@@ -338,15 +267,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   locationButtonText: { color: '#333', fontWeight: '600' },
-  searchSpinner: { marginTop: 8 },
-  resultsList: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginTop: 8, overflow: 'hidden' },
-  resultRow: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  resultName: { fontWeight: '600' },
-  resultAddress: { color: '#888', fontSize: 12, marginTop: 2 },
   linkRow: { flexDirection: 'row', gap: 8 },
   linkInput: { flex: 1 },
   linkButton: {
-    backgroundColor: '#0a7d3c',
+    backgroundColor: '#ec4899',
     borderRadius: 10,
     paddingHorizontal: 18,
     alignItems: 'center',
@@ -354,7 +278,7 @@ const styles = StyleSheet.create({
   },
   linkButtonText: { color: '#fff', fontWeight: '700' },
   submit: {
-    backgroundColor: '#0a7d3c',
+    backgroundColor: '#ec4899',
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',

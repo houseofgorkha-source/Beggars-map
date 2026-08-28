@@ -1,86 +1,78 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
-import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
-import { StarRatingInput } from './StarRating';
-import MapView from './MapView';
 
 type Props = {
   onClose: () => void;
   onPosted: () => void;
   initialCoords?: { lat: number; lon: number };
+  // "Pick on map" hands off to the real full-screen map instead of an
+  // embedded mini-map — this reports the modal's current location (if any)
+  // so that map can seed a candidate pin there, then the modal hides itself
+  // (see `hidden` below) until the caller reports a result via
+  // `pickedLocation`. `source` just tells the caller which explanatory
+  // copy to show ("tap the map" vs. "confirm your GPS fix").
+  onPickOnMap: (current: { lat: number; lon: number } | null, source?: 'manual' | 'current-location') => void;
+  pickedLocation?: { lat: number; lon: number; token: number } | null;
+  hidden?: boolean;
 };
 
-type LocationMode = 'current' | 'map' | 'search' | 'link';
+type LocationMode = 'current' | 'link';
 
-const DEFAULT_CENTER: [number, number] = [77.5946, 12.9716];
+// Short by design — this shows as a pop-up on the map pin, not a paragraph.
+const NOTE_MAX_LENGTH = 70;
+const MAX_PHOTOS = 4;
 
-export default function AddListingModal({ onClose, onPosted, initialCoords }: Props) {
+export default function AddListingModal({ onClose, onPosted, initialCoords, onPickOnMap, pickedLocation, hidden }: Props) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [note, setNote] = useState('');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(initialCoords ?? null);
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
 
-  const [placeQuery, setPlaceQuery] = useState('');
-  const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
 
-  const [pickedCenter, setPickedCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [addReview, setAddReview] = useState(false);
-  const [reviewComment, setReviewComment] = useState('');
-  const [foodQuality, setFoodQuality] = useState(5);
-  const [hygiene, setHygiene] = useState(5);
-  const [availability, setAvailability] = useState(5);
-  const [maintenance, setMaintenance] = useState(5);
-
+  // Pushed in from App.tsx after the user places a pin on the real
+  // full-screen map (see onPickOnMap below) — coords/locationMode are local
+  // state here, only seeded from `initialCoords` at mount, so a later prop
+  // update needs an explicit effect to reach an already-mounted instance.
+  // Keyed on the token (not the lat/lon values) so picking the same spot
+  // twice in a row still counts as a fresh confirmation — same idiom as
+  // flyToCenter elsewhere in this app.
   useEffect(() => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    if (!placeQuery.trim()) {
-      setPlaceResults([]);
-      return;
-    }
-    searchDebounce.current = setTimeout(async () => {
-      const results = await searchPlaces(placeQuery, coords ? { latitude: coords.lat, longitude: coords.lon } : undefined);
-      setPlaceResults(results);
-    }, 400);
-    return () => {
-      if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    };
-  }, [placeQuery]);
+    if (!pickedLocation) return;
+    setCoords({ lat: pickedLocation.lat, lon: pickedLocation.lon });
+    setLocationMode('current');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedLocation?.token]);
 
+  // Hands the GPS fix off to the same full-screen map confirmation "Pick on
+  // map" uses, instead of applying it straight to `coords` — GPS can be off
+  // (indoors, weak signal), so the user gets to see the point on the map
+  // and explicitly confirm ("Use this spot") or adjust it first.
   function useCurrentLocation() {
     setLocating(true);
     setError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
         setLocating(false);
+        onPickOnMap({ lat: pos.coords.latitude, lon: pos.coords.longitude }, 'current-location');
       },
       () => {
         setError('Could not get your location. Try another option below.');
         setLocating(false);
       }
     );
-  }
-
-  function selectPlace(place: PlaceSuggestion) {
-    setCoords({ lat: place.latitude, lon: place.longitude });
-    if (!name.trim()) setName(place.name);
-    setPlaceQuery('');
-    setPlaceResults([]);
   }
 
   async function useMapsLink() {
@@ -97,30 +89,39 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
     setMapsLink('');
   }
 
-  function confirmPickedLocation() {
-    setCoords({ lat: pickedCenter[1], lon: pickedCenter[0] });
-    setLocationMode('current');
-  }
-
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
+    const picked = Array.from(e.target.files ?? []);
+    e.target.value = ''; // allow picking the same file again later
+    if (picked.length === 0) return;
+
+    const room = MAX_PHOTOS - photoFiles.length;
+    const accepted = picked.slice(0, room);
+    setPhotoFiles((prev) => [...prev, ...accepted]);
+    setPhotoPreviews((prev) => [...prev, ...accepted.map((f) => URL.createObjectURL(f))]);
   }
 
-  async function uploadPhoto(userId: string): Promise<{ url: string; path: string } | null> {
-    if (!photoFile) return null;
-    const ext = photoFile.name.split('.').pop() ?? 'jpg';
-    const path = `${userId}/${Date.now()}.${ext}`;
+  function removePhoto(index: number) {
+    URL.revokeObjectURL(photoPreviews[index]);
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
+    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
+  }
 
-    const { error: uploadError } = await supabase.storage.from('listing-photos').upload(path, photoFile, {
-      contentType: photoFile.type || `image/${ext}`,
-    });
-    if (uploadError) return null;
-
-    const { data } = supabase.storage.from('listing-photos').getPublicUrl(path);
-    return { url: data.publicUrl, path };
+  async function uploadPhotos(userId: string): Promise<{ url: string; path: string }[]> {
+    const uploaded: { url: string; path: string }[] = [];
+    for (const [i, file] of photoFiles.entries()) {
+      const ext = file.name.split('.').pop() ?? 'jpg';
+      const path = `${userId}/${Date.now()}-${i}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('listing-photos').upload(path, file, {
+        contentType: file.type || `image/${ext}`,
+      });
+      // Best-effort, matching the original single-photo behavior: a failed
+      // upload just doesn't make it into the listing rather than blocking
+      // the whole submission.
+      if (uploadError) continue;
+      const { data } = supabase.storage.from('listing-photos').getPublicUrl(path);
+      uploaded.push({ url: data.publicUrl, path });
+    }
+    return uploaded;
   }
 
   async function submit() {
@@ -143,7 +144,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
         return;
       }
 
-      const photo = await uploadPhoto(userId);
+      const photos = await uploadPhotos(userId);
 
       const { data: inserted, error: insertError } = await supabase
         .from('listings')
@@ -152,7 +153,11 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
           name: name.trim(),
           price_rupees: priceNumber,
           note: note.trim() || null,
-          photo_url: photo?.url ?? null,
+          // First photo doubles as the single `photo_url` every other
+          // consumer (list card, map popup, listing detail, mobile app)
+          // already knows how to show — the rest live only in
+          // `listing_photos`, additive, nothing else needs to change.
+          photo_url: photos[0]?.url ?? null,
           latitude: coords.lat,
           longitude: coords.lon,
         })
@@ -160,28 +165,23 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
         .single();
 
       if (insertError || !inserted) {
-        // The listing never got created, so this upload is orphaned — clean
-        // it up rather than leaving it in storage forever. Best-effort: if
-        // this delete also fails, the original insert error is still what
-        // gets shown to the user.
-        if (photo) await supabase.storage.from('listing-photos').remove([photo.path]);
-        setError(insertError?.message ?? 'Could not save listing.');
+        // The listing never got created, so these uploads are orphaned —
+        // clean them up rather than leaving them in storage forever.
+        // Best-effort: if this delete also fails, the original insert error
+        // is still what gets shown to the user.
+        if (photos.length) await supabase.storage.from('listing-photos').remove(photos.map((p) => p.path));
+        setError(insertError?.message ?? 'Could not create listing.');
         return;
       }
 
-      if (addReview) {
-        const { error: reviewError } = await supabase.from('reviews').insert({
-          listing_id: inserted.id,
-          created_by: userId,
-          comment: reviewComment.trim() || null,
-          food_quality: foodQuality,
-          hygiene,
-          availability,
-          maintenance,
-        });
-        // The listing itself is already saved — don't block closing the
-        // modal on a review hiccup, just let the person know it happened.
-        if (reviewError) window.alert('Listing posted, but your review could not be saved.');
+      if (photos.length > 1) {
+        const { error: photosError } = await supabase
+          .from('listing_photos')
+          .insert(photos.map((p, i) => ({ listing_id: inserted.id, photo_url: p.url, storage_path: p.path, position: i })));
+        // Non-fatal: the listing itself (with its first photo) was already
+        // created successfully — the extra photos are an enhancement, not
+        // required for the listing to exist.
+        if (photosError) console.warn('Could not save extra photos:', photosError.message);
       }
 
       onPosted();
@@ -191,7 +191,16 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // Faded out (not unmounted) while the user is picking a location on the
+    // full-screen map behind this modal, so this component's own draft
+    // state survives the round-trip untouched. A fade (via the
+    // .modal-backdrop-hidden class, not an instant `display: none`) so the
+    // handoff reads as a deliberate transition rather than the page
+    // glitching — an instant cut was confusing enough to look like a bug.
+    // There's deliberately no way to close the modal via its own ✕ while
+    // hidden — Cancel/Confirm on the map are the only ways back (see
+    // startPickingLocation/onPickOnMap in App.tsx).
+    <div className={`modal-backdrop${hidden ? ' modal-backdrop-hidden' : ''}`} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Add a listing</h2>
@@ -214,13 +223,39 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
           />
 
           <label className="field-label">Note (optional)</label>
-          <textarea className="text-input textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What's good here, timing, anything to know" />
+          <textarea
+            className="text-input textarea"
+            value={note}
+            onChange={(e) => setNote(e.target.value.slice(0, NOTE_MAX_LENGTH))}
+            maxLength={NOTE_MAX_LENGTH}
+            placeholder="e.g. Great thali, open till 6pm"
+          />
+          <span className="field-hint">Keep it short — shows as a pop-up on the map ({note.length}/{NOTE_MAX_LENGTH})</span>
 
-          <label className="field-label">Photo (optional)</label>
-          <div className="photo-picker" onClick={() => fileInputRef.current?.click()}>
-            {photoPreview ? <img src={photoPreview} alt="" className="photo-preview" /> : <span>Choose a photo</span>}
+          <label className="field-label">Photos (optional, up to {MAX_PHOTOS})</label>
+          <div className="photo-thumbs">
+            {photoPreviews.map((src, i) => (
+              <div key={src} className="photo-thumb">
+                <img src={src} alt="" />
+                <button type="button" className="photo-thumb-remove" onClick={() => removePhoto(i)} aria-label="Remove photo">
+                  ✕
+                </button>
+              </div>
+            ))}
+            {photoFiles.length < MAX_PHOTOS ? (
+              <button type="button" className="text-button-inline photo-add-link" onClick={() => fileInputRef.current?.click()}>
+                + Add photo{photoFiles.length > 0 ? '' : 's'}
+              </button>
+            ) : null}
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoChange} style={{ display: 'none' }} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePhotoChange}
+            style={{ display: 'none' }}
+          />
 
           <label className="field-label">Location</label>
           {coords ? (
@@ -228,41 +263,12 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
           ) : null}
 
           <div className="location-tabs">
-            <button className={`tab-button ${locationMode === 'current' ? 'active' : ''}`} onClick={() => setLocationMode('current')}>Current</button>
-            <button className={`tab-button ${locationMode === 'map' ? 'active' : ''}`} onClick={() => setLocationMode('map')}>Pick on map</button>
-            <button className={`tab-button ${locationMode === 'search' ? 'active' : ''}`} onClick={() => setLocationMode('search')}>Search</button>
+            <button className={`tab-button ${locationMode === 'current' ? 'active' : ''}`} onClick={useCurrentLocation} disabled={locating}>
+              {locating ? 'Locating…' : 'Use current location'}
+            </button>
+            <button className="tab-button" onClick={() => onPickOnMap(coords, 'manual')}>Pick on map</button>
             <button className={`tab-button ${locationMode === 'link' ? 'active' : ''}`} onClick={() => setLocationMode('link')}>Paste link</button>
           </div>
-
-          {locationMode === 'current' ? (
-            <button className="secondary-button" onClick={useCurrentLocation} disabled={locating}>
-              {locating ? 'Locating…' : 'Use my current location'}
-            </button>
-          ) : null}
-
-          {locationMode === 'map' ? (
-            <div className="pick-map-wrap">
-              <MapView listings={[]} onSelectListing={() => {}} pickMode pickedCenter={pickedCenter} onPickedCenterChange={setPickedCenter} />
-              <div className="pick-map-pin" />
-              <button className="secondary-button" onClick={confirmPickedLocation}>Use this spot</button>
-            </div>
-          ) : null}
-
-          {locationMode === 'search' ? (
-            <div>
-              <input className="text-input" value={placeQuery} onChange={(e) => setPlaceQuery(e.target.value)} placeholder="Search for the place" />
-              {placeResults.length > 0 ? (
-                <div className="results-list">
-                  {placeResults.map((p) => (
-                    <div key={p.placeId} className="result-row" onClick={() => selectPlace(p)}>
-                      <div className="result-name">{p.name}</div>
-                      {p.address ? <div className="result-address">{p.address}</div> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
 
           {locationMode === 'link' ? (
             <div className="link-row">
@@ -271,29 +277,10 @@ export default function AddListingModal({ onClose, onPosted, initialCoords }: Pr
             </div>
           ) : null}
 
-          <label className="field-label">Already tried it? (optional)</label>
-          {!addReview ? (
-            <button className="secondary-button" onClick={() => setAddReview(true)}>+ Leave a review too</button>
-          ) : (
-            <div className="review-form">
-              <StarRatingInput label="Food quality" value={foodQuality} onChange={setFoodQuality} />
-              <StarRatingInput label="Hygiene" value={hygiene} onChange={setHygiene} />
-              <StarRatingInput label="Availability" value={availability} onChange={setAvailability} />
-              <StarRatingInput label="Maintenance" value={maintenance} onChange={setMaintenance} />
-              <input
-                className="text-input"
-                value={reviewComment}
-                onChange={(e) => setReviewComment(e.target.value)}
-                placeholder="Add a comment (optional)"
-              />
-              <button className="text-button" onClick={() => setAddReview(false)}>Never mind, skip the review</button>
-            </div>
-          )}
-
           {error ? <div className="error-text">{error}</div> : null}
 
           <button className="primary-button submit-button" onClick={submit} disabled={submitting}>
-            {submitting ? 'Posting…' : addReview ? 'Post listing & review' : 'Post listing'}
+            {submitting ? 'Posting…' : 'Post listing'}
           </button>
         </div>
       </div>

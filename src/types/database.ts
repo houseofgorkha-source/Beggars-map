@@ -22,24 +22,6 @@ export type ListingWithVotes = Listing & {
   vote_count: number;
 };
 
-export type Review = {
-  id: string;
-  listing_id: string;
-  created_by: string;
-  comment: string | null;
-  food_quality: number;
-  hygiene: number;
-  availability: number;
-  maintenance: number;
-  created_at: string;
-};
-
-export type ListingRating = {
-  listing_id: string;
-  avg_rating: number;
-  rating_count: number;
-};
-
 export type LeaderboardRow = {
   user_id: string;
   display_name: string;

@@ -29,9 +29,9 @@ export default function LegalModal({ initialTab, onClose }: Props) {
           {tab === 'privacy' ? (
             <>
               <h3>What we collect</h3>
-              <p><strong>On the web (no login):</strong> nothing about you personally — no email, no name, no password. Just a random anonymous session so your votes and reviews stay consistently yours across visits, without identifying you.</p>
+              <p><strong>On the web (no login):</strong> nothing about you personally — no email, no name, no password. Just a random anonymous session so your votes stay consistently yours across visits, without identifying you.</p>
               <p><strong>On the mobile app:</strong> your Google account email and display name, but only if you choose to sign in to post a listing or vote. Browsing never requires this.</p>
-              <p><strong>Content you submit:</strong> listing name, price, photo, note, and location for spots you add; star ratings and comments on reviews; the reason if you report a listing.</p>
+              <p><strong>Content you submit:</strong> listing name, price, photo, note, and location for spots you add; whether you found a listing worth it; the reason if you report a listing.</p>
               <p><strong>Location:</strong> only used when you tap "use current location," to drop a pin or sort listings by distance. It's not stored beyond that action unless you deliberately submit it as a listing's location.</p>
               <p><strong>Photos:</strong> stored in our file storage and publicly visible, since listings are public by design — don't upload a photo with anything private in the background you wouldn't want public.</p>
 
@@ -39,7 +39,7 @@ export default function LegalModal({ initialTab, onClose }: Props) {
               <p>No ads, no ad trackers. No restaurant or business partnerships that influence what gets listed or how it's ranked — every listing is community-submitted and treated equally. No selling data, no data brokers.</p>
 
               <h3>Who your information is shared with</h3>
-              <p>Only the infrastructure that makes the product work: Supabase (our database, authentication, and file storage provider), OLA Maps / Krutrim (map tiles and place search — receives your search text and approximate location when you use map features), and Google (mobile sign-in only, if you choose it).</p>
+              <p>Only the infrastructure that makes the product work: Supabase (our database, authentication, and file storage provider) and Google (Maps — map display and place search, receives your search text and approximate location when you use map features — and, on mobile, sign-in if you choose it).</p>
 
               <h3>Anonymous web sessions</h3>
               <p>The web app posts and votes without any login, using a silent per-visitor session with no personal data attached. This is the intended design for web, not a placeholder — browsing and contributing on web will keep working without sign-in.</p>

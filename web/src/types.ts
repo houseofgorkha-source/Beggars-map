@@ -12,20 +12,11 @@ export type Listing = {
   created_at: string;
 };
 
-export type Review = {
+export type ListingPhoto = {
   id: string;
   listing_id: string;
-  created_by: string;
-  comment: string | null;
-  food_quality: number;
-  hygiene: number;
-  availability: number;
-  maintenance: number;
+  photo_url: string;
+  storage_path: string;
+  position: number;
   created_at: string;
-};
-
-export type ListingRating = {
-  listing_id: string;
-  avg_rating: number;
-  rating_count: number;
 };

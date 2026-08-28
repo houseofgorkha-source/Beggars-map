@@ -1,20 +1,10 @@
+// Place/landmark search only — OLA Places autocomplete. Map rendering is
+// Google Maps JS API (see googleMaps.ts); this file has no rendering
+// responsibility, unlike the pre-migration olaMaps.ts it's revived from
+// (that also had vectorStyleUrl/transformRequest/staticMapUrl for MapLibre
+// tiles, none of which apply now).
 const OLA_BASE = 'https://api.olamaps.io';
 const apiKey = import.meta.env.VITE_OLA_MAPS_API_KEY as string | undefined;
-
-export function vectorStyleUrl(style: 'default-light-standard' | 'default-dark-standard' = 'default-light-standard') {
-  if (!apiKey) return null;
-  return `${OLA_BASE}/tiles/vector/v1/styles/${style}/style.json?api_key=${apiKey}`;
-}
-
-// MapLibre GL JS needs api_key appended to every sub-request (tiles, sprite,
-// glyphs) the style JSON references — same gotcha as the mobile app.
-export function transformRequest(url: string, resourceType?: string) {
-  if (url.includes('api.olamaps.io')) {
-    const separator = url.includes('?') ? '&' : '?';
-    return { url: `${url}${separator}api_key=${apiKey}` };
-  }
-  return { url };
-}
 
 export type PlaceSuggestion = {
   placeId: string;

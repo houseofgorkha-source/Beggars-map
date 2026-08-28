@@ -38,7 +38,7 @@ export default function LegalScreen() {
         {tab === 'privacy' ? (
           <>
             <Section title="What we collect">
-              {'On the web (no login): nothing about you personally — no email, no name, no password. Just a random anonymous session so your votes and reviews stay consistently yours across visits, without identifying you.\n\nOn the mobile app: your Google account email and display name, but only if you choose to sign in to post a listing or vote. Browsing never requires this.\n\nContent you submit: listing name, price, photo, note, and location for spots you add; star ratings and comments on reviews; the reason if you report a listing.\n\nLocation: only used when you tap "use current location," to drop a pin or sort listings by distance. It\'s not stored beyond that action unless you deliberately submit it as a listing\'s location.\n\nPhotos: stored in our file storage and publicly visible, since listings are public by design — don\'t upload a photo with anything private in the background you wouldn\'t want public.'}
+              {'On the web (no login): nothing about you personally — no email, no name, no password. Just a random anonymous session so your votes stay consistently yours across visits, without identifying you.\n\nOn the mobile app: your Google account email and display name, but only if you choose to sign in to post a listing or vote. Browsing never requires this.\n\nContent you submit: listing name, price, photo, note, and location for spots you add; whether you found a listing worth it; the reason if you report a listing.\n\nLocation: only used when you tap "use current location," to drop a pin or sort listings by distance. It\'s not stored beyond that action unless you deliberately submit it as a listing\'s location.\n\nPhotos: stored in our file storage and publicly visible, since listings are public by design — don\'t upload a photo with anything private in the background you wouldn\'t want public.'}
             </Section>
             <Section title="What we don't do">
               {"No ads, no ad trackers. No restaurant or business partnerships that influence what gets listed or how it's ranked — every listing is community-submitted and treated equally. No selling data, no data brokers."}
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   tabs: { flexDirection: 'row', gap: 8, padding: 16, paddingBottom: 8 },
   tabButton: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 20, paddingVertical: 8, alignItems: 'center' },
-  tabButtonActive: { backgroundColor: '#0a7d3c', borderColor: '#0a7d3c' },
+  tabButtonActive: { backgroundColor: '#ec4899', borderColor: '#ec4899' },
   tabText: { fontSize: 13, fontWeight: '600', color: '#333' },
   tabTextActive: { color: '#fff' },
   scroll: { flex: 1 },
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
   section: { marginBottom: 18 },
   sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 6 },
   sectionBody: { fontSize: 14, lineHeight: 21, color: '#333' },
-  link: { color: '#0a7d3c', fontWeight: '600', marginBottom: 8 },
+  link: { color: '#ec4899', fontWeight: '600', marginBottom: 8 },
   notice: {
     marginTop: 12,
     padding: 14,

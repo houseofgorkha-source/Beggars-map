@@ -1,11 +1,20 @@
-import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type NativeSyntheticEvent } from 'react-native';
+import { useRef, useState, useEffect } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { Camera, Map } from '@maplibre/maplibre-react-native';
-import type { MapRef, ViewStateChangeEvent } from '@maplibre/maplibre-react-native';
+import type { CameraRef, MapRef, ViewStateChangeEvent } from '@maplibre/maplibre-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { vectorStyleUrl } from '../lib/olaMaps';
+import { searchPlaces, vectorStyleUrl, type PlaceSuggestion } from '../lib/olaMaps';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -17,6 +26,7 @@ export default function PickLocationScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<PickLocationRoute>();
   const mapRef = useRef<MapRef>(null);
+  const cameraRef = useRef<CameraRef>(null);
   const styleUrl = vectorStyleUrl();
 
   const initialCenter: [number, number] =
@@ -25,6 +35,35 @@ export default function PickLocationScreen() {
       : DEFAULT_CENTER;
 
   const [center, setCenter] = useState<[number, number]>(initialCenter);
+
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
+  const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    if (!placeQuery.trim()) {
+      setPlaceResults([]);
+      return;
+    }
+    searchDebounce.current = setTimeout(async () => {
+      setSearchingPlaces(true);
+      const results = await searchPlaces(placeQuery, { latitude: center[1], longitude: center[0] });
+      setPlaceResults(results);
+      setSearchingPlaces(false);
+    }, 400);
+    return () => {
+      if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeQuery]);
+
+  function selectPlace(place: PlaceSuggestion) {
+    cameraRef.current?.flyTo({ center: [place.longitude, place.latitude], zoom: 16, duration: 1200 });
+    setPlaceQuery('');
+    setPlaceResults([]);
+  }
 
   function confirm() {
     navigation.navigate('AddListing', { pickedLatitude: center[1], pickedLongitude: center[0] });
@@ -48,12 +87,40 @@ export default function PickLocationScreen() {
           setCenter(event.nativeEvent.center);
         }}
       >
-        <Camera initialViewState={{ center: initialCenter, zoom: 15 }} />
+        <Camera ref={cameraRef} initialViewState={{ center: initialCenter, zoom: 15 }} />
       </Map>
 
       <View pointerEvents="none" style={styles.pinWrap}>
         <View style={styles.pin} />
         <View style={styles.pinTip} />
+      </View>
+
+      <View style={styles.searchBar}>
+        <TextInput
+          style={styles.input}
+          value={placeQuery}
+          onChangeText={setPlaceQuery}
+          placeholder="Search a nearby landmark"
+        />
+        {searchingPlaces ? <ActivityIndicator style={styles.searchSpinner} /> : null}
+        {placeResults.length > 0 ? (
+          <FlatList
+            data={placeResults}
+            keyExtractor={(item) => item.placeId}
+            style={styles.resultsList}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <Pressable style={styles.resultRow} onPress={() => selectPlace(item)}>
+                <Text style={styles.resultName}>{item.name}</Text>
+                {item.address ? (
+                  <Text style={styles.resultAddress} numberOfLines={1}>
+                    {item.address}
+                  </Text>
+                ) : null}
+              </Pressable>
+            )}
+          />
+        ) : null}
       </View>
 
       <View style={styles.footer}>
@@ -83,16 +150,44 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#0a7d3c',
+    backgroundColor: '#ec4899',
     borderWidth: 3,
     borderColor: '#fff',
   },
   pinTip: {
     width: 4,
     height: 10,
-    backgroundColor: '#0a7d3c',
+    backgroundColor: '#ec4899',
     marginTop: -2,
   },
+  searchBar: { position: 'absolute', top: 16, left: 16, right: 16 },
+  input: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  searchSpinner: { position: 'absolute', right: 14, top: 12 },
+  resultsList: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    marginTop: 6,
+    maxHeight: 220,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  resultRow: { paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  resultName: { fontWeight: '600', fontSize: 14 },
+  resultAddress: { color: '#888', fontSize: 12, marginTop: 2 },
   footer: {
     position: 'absolute',
     left: 0,
@@ -110,6 +205,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   hint: { textAlign: 'center', color: '#888', marginBottom: 12 },
-  confirmButton: { backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirmButton: { backgroundColor: '#ec4899', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   confirmButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });

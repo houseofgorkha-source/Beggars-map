@@ -2,9 +2,41 @@
   box-sizing: border-box;
 }
 
+:root {
+  --pink-accent: #ec4899;
+  --pink-accent-soft: rgba(236, 72, 153, 0.16);
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
+}
+
+/* Applied globally rather than per-container so every scrollable area on
+   the site — the restaurant list, the Add Listing modal, the About panel,
+   search-result dropdowns, the selected-listing detail card, etc. — gets
+   the same thin pink scrollbar instead of each browser's default gray one. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pink-accent-soft) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--pink-accent-soft);
+  border-radius: 10px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--pink-accent);
 }
 
 body {
@@ -36,9 +68,12 @@ body {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   font-weight: 900;
   font-size: 18px;
-  color: #0a7d3c;
+  color: #ec4899;
   letter-spacing: -0.02em;
 }
 
@@ -55,45 +90,106 @@ body {
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 600;
-  color: #0a7d3c;
+  color: #ec4899;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.search-input {
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 14px;
-  width: 260px;
-  max-width: 100%;
+/* The combined search bar (city + input + icon) and Contribute float
+   directly on the map as their own pills, so the map stays visible
+   around/between them instead of being covered by an opaque toolbar. */
+.map-overlay-row {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
 }
 
-.map-toolbar {
+.map-overlay-row .contribute-button {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  border-color: transparent;
+}
+
+.map-overlay-row .map-picking-cancel {
+  border-radius: 24px;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+/* City selector, text input and search icon combined into one pill so they
+   read as a single search bar rather than three separate controls. */
+.search-bar {
+  flex: 0 1 380px;
+  max-width: 62%;
   display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
+  align-items: center;
+  background: #fff;
+  border-radius: 9px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.city-select-inline {
+  border: none;
+  background: transparent;
+  padding: 8px 6px 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  max-width: 130px;
   flex-shrink: 0;
 }
 
-.map-toolbar .search-input {
-  flex: 1;
-  width: auto;
+.search-bar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 0;
+  background: #eee;
+  flex-shrink: 0;
 }
 
-.city-select {
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  padding: 10px 10px;
-  font-size: 14px;
+.search-input-inline {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  padding: 8px 6px;
+  font-size: 13px;
+  background: transparent;
+}
+
+.search-icon-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  padding: 0 12px;
+  height: 100%;
+  color: #ec4899;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.map-search-results {
+  position: absolute;
+  top: 50px;
+  left: 14px;
+  right: 14px;
+  z-index: 5;
   background: #fff;
-  color: #333;
-  max-width: 130px;
+  border-radius: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
 .coming-soon-banner {
-  background: #eaf6ee;
-  color: #0a7d3c;
+  color: #ec4899;
   font-weight: 600;
   font-size: 13px;
   text-align: center;
@@ -144,7 +240,7 @@ body {
 .about-tagline {
   font-size: 15px;
   font-weight: 700;
-  color: #0a7d3c;
+  color: #ec4899;
   margin: 16px 0 0;
 }
 
@@ -154,18 +250,13 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 24px 8px 24px 24px;
+  align-items: stretch;
+  padding: 16px;
   overflow: hidden;
 }
 
-.map-toolbar,
 .map-frame {
   width: 100%;
-  max-width: 640px;
-}
-
-.map-frame {
   position: relative;
   flex: 1;
   min-height: 0;
@@ -177,7 +268,7 @@ body {
 
 .map-click-hint {
   position: absolute;
-  top: 12px;
+  bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
@@ -188,6 +279,127 @@ body {
   padding: 6px 14px;
   border-radius: 20px;
   pointer-events: none;
+}
+
+/* A gentle floating glow so the one-tap confirm action (either "+ Add this
+   place" or "Use this spot") reads as clearly interactive/highlighted
+   without being distracting — a soft bob plus a pulsing pink halo, kept
+   subtle rather than a big bounce or flashing color change. The glossy
+   look comes from the gradient background plus a faint inset highlight
+   near the top, like a light catching a rounded surface. Keeps the
+   underlying .map-click-hint centering transform (translateX(-50%)) in
+   every keyframe rather than overwriting it. */
+@keyframes floatGlow {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      0 3px 10px rgba(236, 72, 153, 0.4),
+      0 0 0 0 rgba(236, 72, 153, 0.35);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-3px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      0 6px 16px rgba(236, 72, 153, 0.5),
+      0 0 0 6px rgba(236, 72, 153, 0.12);
+  }
+}
+
+/* Lets the conic-gradient's rotation animate as a plain custom property
+   (no transform, no pseudo-element) so only the gradient spins in place —
+   the pill itself, its text, and its position never move or resize. */
+@property --silver-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.map-click-hint-action {
+  pointer-events: auto;
+  cursor: pointer;
+  /* A real `border`, same as .vote-button's `border: 1px solid #ec4899` —
+     just with a transparent color so the two-layer background-clip trick
+     below can paint a gradient into it (border-color alone can't be a
+     gradient). Adds to the pill's box size exactly like any normal
+     border would, same as .vote-button's border does. */
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(135deg, #ff79b8, var(--pink-accent) 65%, #d6377f) padding-box,
+    conic-gradient(
+        from var(--silver-angle),
+        #9a9aa1,
+        #eceef0 25%,
+        #ffffff 50%,
+        #eceef0 75%,
+        #9a9aa1 100%
+      )
+      border-box;
+  animation:
+    floatGlow 2.4s ease-in-out infinite,
+    silver-rotate 3s linear infinite;
+}
+
+@keyframes silver-rotate {
+  to {
+    --silver-angle: 360deg;
+  }
+}
+
+/* A newly-mounted element can't be animated by a plain `transition` (there's
+   no "before" state to transition from) — this runs automatically on
+   mount instead, for the Cancel button/hint pill/dialogue that appear when
+   picking-mode starts, so they read as part of one continuous handoff
+   rather than popping in separately from the modal's own fade-out. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.picking-fade-in {
+  animation: fadeIn 0.2s ease;
+}
+
+/* The explanatory dialogue shown when picking-mode starts — an
+   acknowledgment step (dismissed via its own OK button), not the actual
+   location confirmation (that's still "Use this spot"/"Cancel" on the
+   hint pill below). Reuses this app's existing card look (radius/shadow/
+   padding) rather than a new visual language. Positioned below the
+   search/Cancel row, centered, well above the map's other floating
+   controls so it's unmissable. */
+.picking-dialog {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(320px, calc(100% - 28px));
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+
+.picking-dialog-title {
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.picking-dialog-body {
+  color: #666;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.picking-dialog .primary-button {
+  margin-top: 8px;
+  padding: 8px 24px;
 }
 
 .map-container-wrap {
@@ -237,13 +449,47 @@ body {
   z-index: 5;
 }
 
+.zoom-control {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.zoom-button {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: #ec4899;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-control-divider {
+  width: 1px;
+  height: 18px;
+  background: #eee;
+}
+
 .locate-button {
   width: 34px;
   height: 34px;
   border-radius: 50%;
   border: 1px solid #ddd;
   background: #fff;
-  color: #0a7d3c;
+  color: #ec4899;
   font-size: 16px;
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
@@ -286,62 +532,90 @@ body {
   border-width: 2px;
 }
 
-.list-panel {
-  position: relative;
-  flex: 1;
-  max-width: 420px;
-  min-width: 280px;
-  overflow-y: auto;
-  padding: 24px 20px 24px 12px;
-  border-left: 1px solid #eee;
-}
-
-.listing-cover {
+/* The hard top boundary for the whole side panel (cover + scrollable list)
+   — its `top` is set inline from App.tsx, measured off the overlay row's
+   actual rendered bottom edge (a fixed px guess drifted across
+   browsers/zoom levels and either left a gap or caused overlap). The
+   `top: 35px` here is only a pre-measurement fallback for the first paint.
+   `right: -2px` (not 14px, matching the row above) compensates for this
+   element's own 16px right padding, so the *visible* content inside —
+   cover and cards alike, both direct children with no padding of their
+   own — ends up flush with the Contribute button's right edge. Padding
+   lives here (not on .list-panel) specifically so .listing-cover gets the
+   same inset — it used to be full-bleed width while only the cards were
+   inset, misaligning the two horizontally. No top/bottom padding here:
+   .listing-cover needs to sit flush at the very top (see .top-boundary
+   note above), and bottom breathing room for the scrolled content belongs
+   inside .list-panel's own scroll box, not outside it. */
+.list-panel-outer {
   position: absolute;
-  inset: 0;
-  background: #fff;
-  z-index: 10;
+  top: 35px;
+  right: -2px;
+  bottom: 14px;
+  width: 340px;
+  max-width: calc(100% - 28px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 16px 0 12px;
+}
+
+/* Floats INSIDE the map frame (map fills the whole area behind/around it)
+   instead of a sibling column that shrinks the map to make room for it.
+   The panel itself has no background/shadow of its own — it's just a
+   transparent scroll container; each .list-card below carries its own
+   white background, so cards read as individually floating over the map
+   rather than one opaque sidebar sitting on top of it.
+   A plain flex child now (not absolutely positioned) — it fills whatever
+   space .list-panel-outer has left below .listing-cover, and its own
+   overflow-y: auto is what clips cards at that boundary; nothing can
+   render above or behind .listing-cover since that's a separate sibling
+   entirely outside this scroll container, not sharing its stacking.
+   `min-height` (not 0) guarantees the list keeps at least this much of
+   its own visible/scrollable room even on a short mobile bottom sheet —
+   .listing-cover shrinks (and scrolls its own content internally) rather
+   than being allowed to greedily fill the whole sheet and leave nothing
+   of the list visible underneath it. */
+.list-panel {
+  flex: 1;
+  min-height: 80px;
   overflow-y: auto;
+  padding: 0 0 16px;
 }
 
-.listing-popup .maplibregl-popup-content {
-  padding: 0;
-  overflow: hidden;
-  border-radius: 10px;
+/* Only when there's no .listing-cover before it (nothing selected) does
+   .list-panel need its own top breathing room — otherwise .listing-cover's
+   own margin-bottom already provides that spacing. */
+.list-panel-outer > .list-panel:first-child {
+  padding-top: 16px;
 }
 
-.listing-popup-photo {
-  width: 100%;
-  height: 100px;
-  object-fit: cover;
-  display: block;
-}
-
-.listing-popup-body {
-  padding: 10px 12px;
-}
-
-.listing-popup-name {
-  font-weight: 700;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-
-.listing-popup-rating {
-  color: #f5a623;
-  font-weight: 600;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-
-.listing-popup-address {
-  color: #888;
-  font-size: 11px;
-  line-height: 1.4;
+/* A plain block, sibling of .list-panel inside .list-panel-outer (see
+   App.tsx) — not part of the scrollable list at all, so scrolling cards
+   can never render above, behind, or through it (no shared stacking
+   context to fight over, unlike the earlier sticky-inside-the-scroller
+   approach). Its own overflow-y: auto only matters for its own content
+   (e.g. a long report-reason list) growing past the space available. */
+.listing-cover {
+  /* Allowed to shrink (the default) rather than pinned at its content
+     size — on a short mobile bottom sheet, this is what lets it give
+     ground to .list-panel's own 80px floor instead of greedily filling
+     the whole sheet and leaving no list visible underneath. Its own
+     overflow-y: auto means shrinking just scrolls its content
+     internally rather than clipping it outright. */
+  flex-shrink: 1;
+  min-height: 0;
+  margin-bottom: 10px;
+  max-height: 100%;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
 }
 
 .map-pin {
-  background: #0a7d3c;
+  background: #ec4899;
   color: #fff;
   font-weight: 700;
   font-size: 12px;
@@ -352,10 +626,75 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
+/* The selected listing's own marker — same exact position as always
+   (listing.latitude/longitude, never approximated), just visually called
+   out so it's unambiguous which pin the open detail card belongs to. */
+.map-pin-selected {
+  background: #0a0a0a;
+  border-color: #ec4899;
+  border-width: 3px;
+  box-shadow: 0 0 0 4px rgba(236, 72, 153, 0.35), 0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: scale(1.25);
+}
+
+/* A candidate location that isn't (yet) one of our own listings — current
+   location, a manual map pick, or a landmark search result all share this
+   one marker. Drawn as a real drop-pin (see the inline SVG in MapView.tsx)
+   so it reads the same as any other location pin, with no label/popup
+   attached — just the pin. */
+.search-pin {
+  display: block;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+/* Google's InfoWindow wraps our content in its own chrome (`.gm-style-iw-c`
+   bubble + `.gm-style-iw-d` scroll container) that we don't control via a
+   className option — strip its default padding so our summary popup's own
+   layout sits flush instead of double-padded. These class names are part
+   of the Maps JS API's rendered DOM, not ours; Google can adjust this
+   internal markup between releases. */
+.gm-style-iw-c {
+  padding: 0 !important;
+  border-radius: 10px !important;
+}
+
+.gm-style-iw-d {
+  overflow: hidden !important;
+}
+
+.map-summary-popup {
+  padding: 10px 12px;
+  max-width: 200px;
+}
+
+.map-summary-popup-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.map-summary-popup-note {
+  color: #666;
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
 .loading-text {
   color: #888;
   text-align: center;
   margin-top: 32px;
+}
+
+/* The list-panel itself has no background (map shows through) — its direct
+   status/empty-state children need their own card backdrop to stay legible
+   over the map, same as .list-card. Scoped with `>` so it doesn't reach
+   ListingDetailModal's own .loading-text nested deeper inside .list-panel. */
+.list-panel > .state-block,
+.list-panel > .loading-text {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .state-block {
@@ -375,7 +714,7 @@ body {
   width: 22px;
   height: 22px;
   border: 3px solid #eee;
-  border-top-color: #0a7d3c;
+  border-top-color: #ec4899;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -387,15 +726,20 @@ body {
 }
 
 .list-card {
+  background: #fff;
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 10px;
   cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .list-card:hover {
-  border-color: #0a7d3c;
+  border-color: var(--pink-accent);
+  box-shadow: 0 0 0 3px var(--pink-accent-soft), 0 6px 18px rgba(236, 72, 153, 0.15);
+  transform: translateY(-1px);
 }
 
 .list-card-header {
@@ -411,7 +755,7 @@ body {
 
 .list-card-price {
   font-weight: 700;
-  color: #0a7d3c;
+  color: #ec4899;
 }
 
 .list-card-note {
@@ -428,7 +772,7 @@ body {
 }
 
 .primary-button {
-  background: #0a7d3c;
+  background: #ec4899;
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -460,16 +804,21 @@ body {
   text-decoration: underline;
 }
 
+.text-button-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--pink-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .delete-listing-button {
   display: block;
   margin-top: 10px;
   font-size: 13px;
-}
-
-.delete-review-button {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
 }
 
 .modal-backdrop {
@@ -481,6 +830,17 @@ body {
   justify-content: center;
   z-index: 50;
   padding: 16px;
+  transition: opacity 0.2s ease;
+}
+
+/* Used while "Pick on map"/"Use current location" hand off to the
+   full-screen map behind this modal — fades it out instead of an instant
+   `display: none` cut, which read as the page glitching rather than a
+   deliberate transition. Kept in the DOM and just made non-interactive,
+   since this component's own draft state needs to survive the round-trip. */
+.modal-backdrop-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .modal {
@@ -528,6 +888,13 @@ body {
   margin: 16px 0 6px;
 }
 
+.field-hint {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+}
+
 .text-input {
   width: 100%;
   border: 1px solid #ddd;
@@ -542,27 +909,54 @@ body {
   resize: vertical;
 }
 
-.photo-picker {
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  height: 120px;
+.photo-thumbs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  color: #888;
-  cursor: pointer;
-  overflow: hidden;
+  gap: 8px;
 }
 
-.photo-preview {
+.photo-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.photo-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+.photo-thumb-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-add-link {
+  font-size: 13px;
 }
 
 .pinned-banner {
-  background: #eaf6ee;
-  color: #0a7d3c;
+  background: #fce9f2;
+  color: #ec4899;
   font-weight: 600;
   border-radius: 10px;
   padding: 10px 12px;
@@ -586,46 +980,9 @@ body {
 }
 
 .tab-button.active {
-  background: #0a7d3c;
+  background: #ec4899;
   color: #fff;
-  border-color: #0a7d3c;
-}
-
-.pick-map-wrap {
-  position: relative;
-  height: 260px;
-  border-radius: 10px;
-  overflow: hidden;
-  margin-bottom: 8px;
-}
-
-.pick-map-pin {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 16px;
-  height: 16px;
-  margin-left: -8px;
-  margin-top: -16px;
-  border-radius: 50%;
-  background: #0a7d3c;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-}
-
-.pick-map-wrap .secondary-button {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
-  right: 10px;
-}
-
-.results-list {
-  border: 1px solid #eee;
-  border-radius: 10px;
-  margin-top: 8px;
-  overflow: hidden;
+  border-color: #ec4899;
 }
 
 .result-row {
@@ -635,7 +992,7 @@ body {
 }
 
 .result-row:hover {
-  background: #f7f7f7;
+  background: var(--pink-accent-soft);
 }
 
 .result-name {
@@ -686,7 +1043,7 @@ body {
 .detail-price {
   font-size: 22px;
   font-weight: 800;
-  color: #0a7d3c;
+  color: #ec4899;
   margin-right: 10px;
 }
 
@@ -703,9 +1060,9 @@ body {
 
 .vote-button {
   flex: 1;
-  border: 1px solid #0a7d3c;
+  border: 1px solid #ec4899;
   background: #fff;
-  color: #0a7d3c;
+  color: #ec4899;
   border-radius: 10px;
   padding: 10px;
   font-weight: 600;
@@ -714,7 +1071,7 @@ body {
 }
 
 .vote-button.active {
-  background: #0a7d3c;
+  background: #ec4899;
   color: #fff;
 }
 
@@ -737,82 +1094,6 @@ body {
 .section-title {
   margin-top: 24px;
   font-size: 15px;
-}
-
-.review-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  padding: 14px;
-}
-
-.review-submit {
-  width: 100%;
-  margin-top: 4px;
-}
-
-.review-card {
-  border-top: 1px solid #eee;
-  padding: 10px 0;
-}
-
-.review-comment {
-  color: #555;
-  margin-top: 4px;
-  font-size: 14px;
-}
-
-.star-input-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.star-input-label {
-  font-size: 14px;
-  color: #333;
-}
-
-.star-input-stars {
-  display: flex;
-  gap: 2px;
-}
-
-.star {
-  font-size: 22px;
-  color: #ddd;
-  cursor: pointer;
-  user-select: none;
-}
-
-.star-filled {
-  color: #f5a623;
-}
-
-.star-display,
-.star-display-empty {
-  display: block;
-  font-weight: 700;
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-.star-display {
-  color: #f5a623;
-}
-
-.star-display-empty {
-  color: #aaa;
-  font-weight: 500;
-}
-
-.star-display.small,
-.star-display-empty.small {
-  font-size: 12px;
 }
 
 .footer {
@@ -839,7 +1120,7 @@ body {
 }
 
 .footer-link:hover {
-  color: #0a7d3c;
+  color: #ec4899;
   text-decoration: underline;
 }
 
@@ -899,7 +1180,7 @@ body {
 }
 
 .legal-body a {
-  color: #0a7d3c;
+  color: #ec4899;
 }
 
 .legal-updated {
@@ -936,19 +1217,93 @@ body {
     align-items: center;
   }
   .map-panel {
-    flex: none;
-    height: 40vh;
-    padding: 12px 20px;
+    padding: 10px;
   }
-  .map-toolbar {
+  .map-overlay-row {
     flex-wrap: wrap;
   }
-  .list-panel {
-    flex: 1;
-    min-height: 0;
+  /* Same "overlay on the map, don't shrink it" treatment as desktop, just
+     anchored as a bottom sheet instead of a right-side panel — there's no
+     room for a 340px side panel on a phone screen. Targets the outer
+     wrapper (cover + scrollable list together) so the sheet's 45% height
+     budget covers both, not just the scrollable part. */
+  .list-panel-outer {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
     max-width: none;
-    border-left: none;
-    border-top: 1px solid #eee;
-    overflow-y: auto;
+    max-height: 45%;
+    border-radius: 16px 16px 0 0;
+  }
+  /* These float relative to the *full* map height (their desktop `bottom`
+     values), but the bottom sheet above now covers the bottom 45% of that
+     same map — without this they'd render underneath/behind the list
+     cards instead of above them. Lifted by the sheet's own max-height plus
+     each control's original offset, so the same relative stacking between
+     the hint pill and the zoom/locate row is preserved. */
+  .zoom-control {
+    bottom: calc(45% + 10px);
+  }
+  .locate-control {
+    bottom: calc(45% + 10px);
+  }
+  .map-click-hint {
+    bottom: calc(45% + 40px);
+  }
+  /* Keeps the selected-listing card from shrinking down to an unusably
+     tiny sliver when both it and the list compete for the bottom sheet's
+     limited height — enough room for name/price/action-row to stay
+     visible before anything (e.g. the photo) has to scroll internally. */
+  .listing-cover {
+    min-height: 140px;
+  }
+}
+
+/* Desktop/laptop only — a smaller, denser rendering of the selected
+   listing's detail card so it takes up less of the side panel and more
+   of the restaurant list stays visible/scrollable underneath it. Scoped
+   to .listing-cover specifically (not .modal-header/.modal-body/etc.
+   generally) since those class names are shared with the Add Listing
+   modal, which should stay exactly as-is. Left untouched on mobile,
+   where .listing-cover already shrinks under the bottom sheet's own
+   space pressure instead (see .list-panel's min-height above). */
+@media (min-width: 721px) {
+  .listing-cover .modal-header {
+    padding: 10px 14px;
+  }
+  .listing-cover .modal-header h2 {
+    font-size: 14px;
+  }
+  .listing-cover .modal-body {
+    padding: 10px 14px 14px;
+  }
+  .listing-cover .detail-photo {
+    height: 110px;
+  }
+  .listing-cover .detail-price-row {
+    margin-top: 8px;
+  }
+  .listing-cover .detail-price {
+    font-size: 16px;
+    margin-right: 6px;
+  }
+  .listing-cover .detail-note {
+    font-size: 12px;
+  }
+  .listing-cover .detail-actions {
+    margin-top: 10px;
+    gap: 6px;
+  }
+  .listing-cover .vote-button {
+    min-width: 100px;
+    padding: 7px;
+    font-size: 12px;
+  }
+  .listing-cover .secondary-button,
+  .listing-cover .report-button {
+    padding: 7px 10px;
+    font-size: 12px;
   }
 }

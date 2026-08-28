@@ -55,8 +55,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', padding: 24, justifyContent: 'center' },
   title: { fontSize: 22, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   subtitle: { color: '#666', textAlign: 'center', marginBottom: 24 },
-  button: { backgroundColor: '#0a7d3c', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  button: { backgroundColor: '#ec4899', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   legalNotice: { color: '#888', fontSize: 12, textAlign: 'center', marginTop: 20, lineHeight: 18 },
-  legalLink: { color: '#0a7d3c', fontWeight: '600' },
+  legalLink: { color: '#ec4899', fontWeight: '600' },
 });

@@ -37,8 +37,7 @@ export default function LeaderboardScreen() {
             <View style={styles.info}>
               <Text style={styles.name}>{item.display_name}</Text>
               <Text style={styles.meta}>
-                {item.listing_count} listing{item.listing_count === 1 ? '' : 's'} · {item.review_count} review
-                {item.review_count === 1 ? '' : 's'}
+                {item.listing_count} listing{item.listing_count === 1 ? '' : 's'}
               </Text>
             </View>
             <Text style={styles.score}>{item.score}</Text>
@@ -64,5 +63,5 @@ const styles = StyleSheet.create({
   info: { flex: 1 },
   name: { fontSize: 15, fontWeight: '600' },
   meta: { color: '#888', fontSize: 13, marginTop: 2 },
-  score: { fontWeight: '700', fontSize: 16, color: '#0a7d3c' },
+  score: { fontWeight: '700', fontSize: 16, color: '#ec4899' },
 });
