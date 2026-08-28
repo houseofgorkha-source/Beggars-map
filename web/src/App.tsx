@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
 import { formatRelativeTime } from './lib/relativeTime';
@@ -6,7 +7,6 @@ import MapView from './components/MapView';
 import Logo from './components/Logo';
 import AddListingModal from './components/AddListingModal';
 import ListingDetailModal from './components/ListingDetailModal';
-import ListingPreviewCard from './components/ListingPreviewCard';
 import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
 import AboutModal from './components/AboutModal';
@@ -16,6 +16,31 @@ type ListingWithVotes = Listing & { voteCount: number };
 
 const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'];
 
+// Mirrors styles.css's combined mobile media query (portrait width OR
+// mobile landscape — a rotated phone commonly reports widths well above
+// 720px, which plain width-based JS checks below used to miss). Kept as
+// one shared string so the CSS and JS "is this mobile?" answers can't
+// drift apart.
+const MOBILE_MEDIA_QUERY = '(max-width: 720px), (hover: none) and (pointer: coarse) and (max-height: 500px)';
+
+// The mobile bottom sheet's three snap states, as a fraction of the map
+// frame's own height — clamped in computeSheetSnaps below so extreme
+// container heights (a very short phone-landscape frame, say) can't
+// invert the ordering or collapse a state down to nothing.
+type SheetState = 'collapsed' | 'partial' | 'expanded';
+
+function computeSheetSnaps(containerHeight: number) {
+  const collapsed = Math.round(Math.max(96, Math.min(150, containerHeight * 0.22)));
+  const expanded = Math.round(Math.max(collapsed + 80, containerHeight * 0.86));
+  // 150px floor (not just collapsed + 40) keeps "partial" at or above
+  // .listing-cover's own 140px CSS min-height on very short (phone
+  // landscape) frames — otherwise a selection auto-expanding into
+  // "partial" could hand the detail card less room than its own floor
+  // demands, forcing a few px of overflow out of the sheet.
+  const partial = Math.round(Math.max(150, collapsed + 40, Math.min(expanded - 40, containerHeight * 0.48)));
+  return { collapsed, partial, expanded };
+}
+
 export default function App() {
   const [listings, setListings] = useState<ListingWithVotes[]>([]);
   const [query, setQuery] = useState('');
@@ -24,11 +49,6 @@ export default function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [addInitialCoords, setAddInitialCoords] = useState<{ lat: number; lon: number } | undefined>(undefined);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
-  // Mobile-web only: set by selectListing() instead of selectedListingId
-  // when the viewport is at/under the app's existing 720px mobile
-  // breakpoint. Desktop is untouched — selectListing keeps setting
-  // selectedListingId directly there, same as before this feature existed.
-  const [previewListingId, setPreviewListingId] = useState<string | null>(null);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms' | null>(null);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -58,6 +78,21 @@ export default function App() {
   // breakpoint — on mobile the list is a bottom sheet, unrelated to the
   // row's position, so no inline top should be forced there.
   const [sidePanelTop, setSidePanelTop] = useState<number | null>(null);
+  // Mobile-web collapsible bottom sheet — desktop's .list-panel-outer stays
+  // fully positioned by CSS (sidePanelTop above), this only ever drives
+  // mobile's version. mapFrameRef/frameHeight measure the sheet's actual
+  // container so the three snap states are real pixel heights, not a bare
+  // CSS percentage that can't be dragged smoothly. dragHeightRef mirrors
+  // dragHeight but read synchronously inside the pointer-move handler,
+  // which fires faster than React re-renders can keep the state read
+  // fresh — using stale state there produced visible jitter.
+  const mapFrameRef = useRef<HTMLDivElement>(null);
+  const [frameHeight, setFrameHeight] = useState(0);
+  const [sheetState, setSheetState] = useState<SheetState>('collapsed');
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const dragHeightRef = useRef<number | null>(null);
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+  const dragStartRef = useRef<{ startY: number; startHeight: number; lastY: number; lastT: number; velocity: number } | null>(null);
   // Selecting a result sets `query` to the place name to show it in the box —
   // that alone would re-trigger the debounced autocomplete effect below and
   // pop the dropdown back open a moment later. This flag tells that effect
@@ -117,8 +152,6 @@ export default function App() {
     [listings, query]
   );
 
-  const previewListing = previewListingId ? listings.find((l) => l.id === previewListingId) ?? null : null;
-
   // Landmark search on the browse map — separate from the substring filter
   // above (runs on every keystroke, no debounce, purely local): this
   // debounces a call out to OLA Places so searching a landmark (not
@@ -171,10 +204,10 @@ export default function App() {
   // selection anyway so the *card list* also starts from its top instead
   // of wherever it was left scrolled.
   useEffect(() => {
-    if (selectedListingId || previewListingId) {
+    if (selectedListingId) {
       listPanelRef.current?.scrollTo({ top: 0 });
     }
-  }, [selectedListingId, previewListingId]);
+  }, [selectedListingId]);
 
   // FLIP animation: the clicked list-card visibly "flies" from where it
   // was in the list up into the detail-card slot at the top, instead of
@@ -213,7 +246,7 @@ export default function App() {
   // one line to two on narrow desktop widths, or the Contribute/Cancel
   // swap can change its width) rather than assumed from a fixed height.
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 720px)');
+    const mq = window.matchMedia(MOBILE_MEDIA_QUERY);
     function measure() {
       if (mq.matches) {
         setSidePanelTop(null);
@@ -233,6 +266,86 @@ export default function App() {
       window.removeEventListener('resize', measure);
     };
   }, [pickingLocation]);
+
+  // Measures .map-frame's real rendered height so the bottom sheet's three
+  // snap states (computeSheetSnaps) are actual pixel heights the drag
+  // handlers below can track 1:1 with the finger — a bare CSS percentage
+  // can't be read/interpolated from JS during a drag. Runs regardless of
+  // viewport (cheap, harmless on desktop — nothing there consumes
+  // frameHeight/--sheet-h).
+  useEffect(() => {
+    const el = mapFrameRef.current;
+    if (!el) return;
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      setFrameHeight(entry.contentRect.height);
+    });
+    resizeObserver.observe(el);
+    setFrameHeight(el.clientHeight);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const sheetSnaps = useMemo(() => computeSheetSnaps(frameHeight), [frameHeight]);
+  // While dragging, the finger's raw offset wins; otherwise the current
+  // snap state's own height applies (animated via CSS transition — see
+  // .list-panel-outer's `dragging` class toggle below, which turns that
+  // transition off only while a drag is actually in progress).
+  const appliedSheetHeight = dragHeight ?? sheetSnaps[sheetState];
+
+  function handleSheetDragStart(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const startHeight = dragHeightRef.current ?? sheetSnaps[sheetState];
+    dragStartRef.current = { startY: e.clientY, startHeight, lastY: e.clientY, lastT: performance.now(), velocity: 0 };
+    setIsDraggingSheet(true);
+  }
+
+  function handleSheetDragMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragStartRef.current;
+    if (!drag) return;
+    // Moving the finger UP (smaller clientY) should make the sheet taller.
+    const deltaY = drag.startY - e.clientY;
+    const minHeight = sheetSnaps.collapsed * 0.7;
+    const maxHeight = sheetSnaps.expanded * 1.04;
+    const nextHeight = Math.max(minHeight, Math.min(maxHeight, drag.startHeight + deltaY));
+    dragHeightRef.current = nextHeight;
+    setDragHeight(nextHeight);
+
+    const now = performance.now();
+    const dt = now - drag.lastT;
+    if (dt > 0) drag.velocity = (drag.lastY - e.clientY) / dt; // px/ms, positive = moving up
+    drag.lastY = e.clientY;
+    drag.lastT = now;
+  }
+
+  // Nearest-snap-point on release, unless the finger was moving fast enough
+  // to read as a deliberate flick — then it jumps one state further in
+  // that direction even if the released height is still closer to the
+  // state it started from, which is what makes a quick swipe feel
+  // responsive rather than needing to travel the full distance by hand.
+  function handleSheetDragEnd() {
+    const drag = dragStartRef.current;
+    if (!drag) return;
+    dragStartRef.current = null;
+    setIsDraggingSheet(false);
+
+    const releasedHeight = dragHeightRef.current ?? drag.startHeight;
+    dragHeightRef.current = null;
+    setDragHeight(null);
+
+    const order: SheetState[] = ['collapsed', 'partial', 'expanded'];
+    const FLING_PX_PER_MS = 0.5;
+    let next: SheetState;
+    if (Math.abs(drag.velocity) > FLING_PX_PER_MS) {
+      const currentIndex = order.indexOf(sheetState);
+      const step = drag.velocity > 0 ? 1 : -1;
+      next = order[Math.max(0, Math.min(order.length - 1, currentIndex + step))];
+    } else {
+      next = order.reduce((closest, candidate) =>
+        Math.abs(sheetSnaps[candidate] - releasedHeight) < Math.abs(sheetSnaps[closest] - releasedHeight) ? candidate : closest
+      , 'collapsed' as SheetState);
+    }
+    setSheetState(next);
+  }
 
   // OLA's autocomplete already returns coordinates inline, no follow-up
   // details fetch needed before flying the camera there. Reuses the exact
@@ -261,31 +374,23 @@ export default function App() {
   // Selecting a listing (map marker or list card) shares the exact same
   // camera mechanism as a landmark search — same pan+zoom, same reliability
   // — instead of relying solely on the info-window effect's own panTo.
-  // On mobile web (<=720px, same breakpoint the rest of the app already
-  // uses) this opens the lean ListingPreviewCard instead of jumping
-  // straight into the full ListingDetailModal — desktop is unaffected.
+  // Opens the full ListingDetailModal pinned at the top of the panel on
+  // every viewport (mobile included) — .list-panel below already excludes
+  // whichever listing is selected, so there's no duplicate card.
   function selectListing(id: string) {
-    const isMobile = window.matchMedia('(max-width: 720px)').matches;
-    if (isMobile) {
-      setPreviewListingId(id);
-      setSelectedListingId(null);
-    } else {
-      setSelectedListingId(id);
-      setPreviewListingId(null);
-    }
+    setSelectedListingId(id);
     setSearchPin(null);
+    // Mobile's bottom sheet defaults to collapsed (~1 card peeking above
+    // the map) — a fresh selection needs at least the "partial" state to
+    // actually show its detail card, otherwise it'd open pinned at the top
+    // of a sheet too short to display it. Only bumps up, never collapses
+    // a sheet the user already had further open. No-op on desktop, which
+    // doesn't read sheetState for anything.
+    setSheetState((prev) => (prev === 'collapsed' ? 'partial' : prev));
     const listing = listings.find((l) => l.id === id);
     if (listing) {
       setFlyToCenter((prev) => ({ center: [listing.longitude, listing.latitude], token: (prev?.token ?? 0) + 1 }));
     }
-  }
-
-  // Preview card's "Tap for full details" — hands off to the same full
-  // ListingDetailModal desktop already opens directly.
-  function openPreviewDetails() {
-    if (!previewListingId) return;
-    setSelectedListingId(previewListingId);
-    setPreviewListingId(null);
   }
 
   function handlePosted() {
@@ -303,7 +408,6 @@ export default function App() {
   // so a stray/misplaced tap doesn't immediately launch the form.
   function handleMapClick(latitude: number, longitude: number) {
     setSearchPin({ lat: latitude, lng: longitude });
-    setPreviewListingId(null);
   }
 
   // "Pick on map" inside an already-open Add Listing modal hides that modal
@@ -369,7 +473,11 @@ export default function App() {
         </section>
 
         <div className="map-panel">
-          <div className="map-frame">
+          <div
+            className="map-frame"
+            ref={mapFrameRef}
+            style={frameHeight > 0 ? ({ '--sheet-h': `${appliedSheetHeight}px` } as CSSProperties) : undefined}
+          >
             <MapView
               listings={filtered}
               onSelectListing={pickingLocation ? () => {} : selectListing}
@@ -377,7 +485,7 @@ export default function App() {
               onMapClick={handleMapClick}
               flyToCenter={flyToCenter ?? undefined}
               searchPin={searchPin}
-              selectedListingId={pickingLocation ? null : (previewListingId ?? selectedListingId)}
+              selectedListingId={pickingLocation ? null : selectedListingId}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -451,14 +559,24 @@ export default function App() {
               </div>
             )}
 
-            <div className="list-panel-outer" style={sidePanelTop != null ? { top: sidePanelTop } : undefined}>
-              {previewListing ? (
-                <ListingPreviewCard
-                  listing={previewListing}
-                  onClose={() => setPreviewListingId(null)}
-                  onViewDetails={openPreviewDetails}
-                />
-              ) : selectedListingId ? (
+            <div
+              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}`}
+              style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
+            >
+              <div
+                className="sheet-drag-handle"
+                onPointerDown={handleSheetDragStart}
+                onPointerMove={handleSheetDragMove}
+                onPointerUp={handleSheetDragEnd}
+                onPointerCancel={handleSheetDragEnd}
+                role="button"
+                tabIndex={-1}
+                aria-label="Drag to resize the restaurant list"
+              >
+                <span className="sheet-drag-handle-bar" aria-hidden="true" />
+              </div>
+
+              {selectedListingId ? (
                 <ListingDetailModal ref={coverRef} listingId={selectedListingId} onClose={() => setSelectedListingId(null)} onUpdated={load} />
               ) : null}
 

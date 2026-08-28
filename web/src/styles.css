@@ -561,6 +561,12 @@ body {
   padding: 0 16px 0 12px;
 }
 
+/* Desktop has nothing to drag (its own side panel isn't resizable) — the
+   mobile media query below is the only place this becomes visible. */
+.sheet-drag-handle {
+  display: none;
+}
+
 /* Floats INSIDE the map frame (map fills the whole area behind/around it)
    instead of a sibling column that shrinks the map to make room for it.
    The panel itself has no background/shadow of its own — it's just a
@@ -584,10 +590,13 @@ body {
   padding: 0 0 16px;
 }
 
-/* Only when there's no .listing-cover before it (nothing selected) does
-   .list-panel need its own top breathing room — otherwise .listing-cover's
-   own margin-bottom already provides that spacing. */
-.list-panel-outer > .list-panel:first-child {
+/* Only when .list-panel directly follows the drag handle (nothing
+   selected, so no .listing-cover in between) does it need its own top
+   breathing room — otherwise .listing-cover's own margin-bottom already
+   provides that spacing. .sheet-drag-handle is only ever visible on
+   mobile, but it's always present in the DOM (see App.tsx), so this
+   sibling check works identically on desktop too. */
+.sheet-drag-handle + .list-panel {
   padding-top: 16px;
 }
 
@@ -1225,7 +1234,16 @@ body {
   margin-bottom: 4px;
 }
 
-@media (max-width: 720px) {
+/* Portrait mobile (narrow width) OR mobile landscape (short height on a
+   touch device) — the same "app becomes a stacked map + bottom sheet"
+   layout applies to both, just with different absolute dimensions.
+   max-width alone can't catch landscape: a rotated phone commonly reports
+   667-932px wide, comfortably above the 720px cutoff, which is exactly
+   how the desktop-oriented .about-panel sidebar was leaking through on
+   rotation. `hover: none` + `pointer: coarse` targets touchscreens
+   specifically (not a desktop browser window resized short), so a real
+   desktop layout is never affected by the height half of this query. */
+@media (max-width: 720px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   .main {
     flex-direction: column;
   }
@@ -1239,17 +1257,68 @@ body {
     display: inline-flex;
     align-items: center;
   }
+  /* Tighter header so the map gets more of the screen — was wrapping to
+     two lines and eating ~70px of vertical space before the map even
+     started. */
+  .topbar {
+    padding: 10px 14px;
+    gap: 10px;
+  }
+  .brand {
+    font-size: 16px;
+  }
+  .brand-sub {
+    font-size: 11px;
+  }
+  .about-button {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+  .coming-soon-banner {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
   .map-panel {
     padding: 10px;
   }
+  /* The search bar's desktop-tuned `max-width: 62%` (in .search-bar
+     itself) was crushing the input to a sliver of its already-narrow
+     mobile row, and the row still wrapped the Contribute button onto a
+     second line where it floated loose over the map with no room around
+     it. Un-capping the search bar and keeping the row on one line (its
+     own flex layout — search-bar flex:1, Contribute button auto width —
+     already fits both at 375px+) fixes both at once. */
   .map-overlay-row {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+  .search-bar {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+  }
+  .city-select-inline {
+    max-width: 84px;
+    padding-right: 2px;
+  }
+  .map-overlay-row .contribute-button,
+  .map-overlay-row .map-picking-cancel {
+    padding: 9px 14px;
+    font-size: 13px;
+    flex-shrink: 0;
   }
   /* Same "overlay on the map, don't shrink it" treatment as desktop, just
      anchored as a bottom sheet instead of a right-side panel — there's no
      room for a 340px side panel on a phone screen. Targets the outer
      wrapper (cover + scrollable list together) so the sheet's 45% height
      budget covers both, not just the scrollable part. */
+  /* Draggable bottom sheet — height is driven by the `--sheet-h` custom
+     property (set inline on .map-frame from App.tsx's sheetState/drag
+     handlers), with a plain 45% fallback for the brief window before JS
+     has measured .map-frame's real height on first paint. The transition
+     animates snapping between collapsed/partial/expanded; the
+     `.sheet-dragging` modifier (added only while a finger/pointer is
+     actually down) turns it off so the sheet tracks the pointer 1:1
+     instead of animating a fresh target on every pointermove. */
   .list-panel-outer {
     top: auto;
     left: 0;
@@ -1257,23 +1326,85 @@ body {
     bottom: 0;
     width: auto;
     max-width: none;
-    max-height: 45%;
+    height: var(--sheet-h, 45%);
+    max-height: 92%;
     border-radius: 16px 16px 0 0;
+    transition: height 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    /* Desktop leaves this transparent on purpose (a floating side panel
+       over a visible map, see the comment on .list-panel above) — but as
+       a bottom sheet, that let the map (and its pins/price pills) show
+       through the gaps between cards, reading as broken rather than a
+       solid sheet. Mobile gets its own opaque backing + a lifted-off-the-
+       map shadow instead. */
+    background: #fff;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  }
+  .list-panel-outer.sheet-dragging {
+    transition: none;
+  }
+  /* Always in the DOM (see App.tsx) but only interactive/visible here —
+     desktop's side panel has nothing to drag. touch-action: none stops
+     the browser's own scroll/refresh gesture from competing with the
+     pointer handlers while a drag is in progress. A generous invisible
+     hit area (padding) around the visible bar makes it easy to grab
+     without needing to hit a 4px-tall target exactly. */
+  .sheet-drag-handle {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 14px;
+    touch-action: none;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+  .sheet-drag-handle:active {
+    cursor: grabbing;
+  }
+  .sheet-drag-handle-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: #ddd;
+  }
+  /* Compact enough that 2-3 listings are visible at once instead of one
+     and a sliver — smaller padding/type, and the note clipped to a single
+     line (a full description isn't needed to scan-and-tap a spot). */
+  .list-card {
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    box-shadow: none;
+    border-color: #eee;
+  }
+  .list-card-name {
+    font-size: 14px;
+  }
+  .list-card-note {
+    margin-top: 3px;
+    font-size: 12px;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .list-card-footer {
+    margin-top: 5px;
   }
   /* These float relative to the *full* map height (their desktop `bottom`
-     values), but the bottom sheet above now covers the bottom 45% of that
-     same map — without this they'd render underneath/behind the list
-     cards instead of above them. Lifted by the sheet's own max-height plus
-     each control's original offset, so the same relative stacking between
-     the hint pill and the zoom/locate row is preserved. */
+     values), but the bottom sheet above now covers the bottom of that same
+     map — without this they'd render underneath/behind the list cards
+     instead of above them. Tracks the same `--sheet-h` custom property the
+     sheet itself uses (falling back to the same 45% while unmeasured), so
+     these stay pinned just above the sheet's actual current height —
+     collapsed, mid-drag, or expanded — rather than the old fixed 45%
+     assumption, which would have left them floating over empty map once
+     the sheet could change height. */
   .zoom-control {
-    bottom: calc(45% + 10px);
+    bottom: calc(var(--sheet-h, 45%) + 10px);
   }
   .locate-control {
-    bottom: calc(45% + 10px);
+    bottom: calc(var(--sheet-h, 45%) + 10px);
   }
   .map-click-hint {
-    bottom: calc(45% + 40px);
+    bottom: calc(var(--sheet-h, 45%) + 40px);
   }
   /* Keeps the selected-listing card from shrinking down to an unusably
      tiny sliver when both it and the list compete for the bottom sheet's
@@ -1286,77 +1417,43 @@ body {
   .detail-posted {
     display: block;
   }
+  /* Compact and clearly out of the way of the map/list — no reason for
+     four lines of link text to compete for scroll space with the actual
+     browsing experience above it. */
+  .footer {
+    padding: 10px 16px;
+    gap: 6px 10px;
+  }
+  .footer-text,
+  .footer-link {
+    font-size: 11px;
+  }
 }
 
-/* Mobile-web only — see App.tsx's selectListing (gated on the same 720px
-   breakpoint as everything else above). A lean, no-network preview so
-   tapping a pin/list-card reads as instant, with a tap-through to the full
-   ListingDetailModal for photo/directions/report. Reuses .listing-cover's
-   visual language (card look, position in the bottom sheet) rather than
-   inventing a new one. */
-.listing-preview-card {
-  position: relative;
-  background: #fff;
-  border-radius: 16px 16px 0 0;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
-  padding: 16px 18px;
-  cursor: pointer;
-}
-
-.listing-preview-close {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-}
-
-.listing-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding-right: 22px;
-}
-
-.listing-preview-name {
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.listing-preview-price {
-  font-weight: 800;
-  color: #ec4899;
-  font-size: 15px;
-}
-
-.listing-preview-note {
-  color: #555;
-  font-size: 13px;
-  margin: 6px 0 0;
-}
-
-.listing-preview-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-}
-
-.listing-preview-votes {
-  color: #888;
-  font-size: 12px;
-}
-
-.listing-preview-posted {
-  color: #aaa;
-  font-size: 12px;
-}
-
-.listing-preview-hint {
-  display: block;
-  margin-top: 8px;
-  color: var(--pink-accent);
-  font-size: 12px;
-  font-weight: 600;
+/* Mobile landscape specifically — on top of the shared block above. Height
+   is the scarce resource here (as little as 375px total), not width, so
+   this reclaims vertical space by hiding secondary chrome rather than
+   shrinking anything readable further (fonts/cards stay at the portrait
+   sizes set above). */
+@media (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  /* The tagline and promo banner are the two lines with the least
+     information density on screen — cutting them (not shrinking them)
+     buys back a full row of height for the map/list without touching any
+     control a user actually needs (About Us itself stays reachable). */
+  .brand-sub,
+  .coming-soon-banner {
+    display: none;
+  }
+  .topbar {
+    padding: 6px 14px;
+  }
+  .about-button {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+  .map-panel {
+    padding: 6px;
+  }
 }
 
 /* Desktop/laptop only — a smaller, denser rendering of the selected
@@ -1403,5 +1500,60 @@ body {
   .listing-cover .report-button {
     padding: 7px 10px;
     font-size: 12px;
+  }
+}
+
+/* Tablet — iPad, Surface Pro, and similar (~768-1199px wide). Keeps the
+   desktop side-panel-over-map layout (unlike phone, there's enough height
+   here for side-by-side rather than a bottom sheet), but the desktop
+   panel's fixed 340px width and 380px About sidebar were both tuned for
+   1200px+ screens — on a tablet that combination left an excessively
+   large map with a cramped, narrow list. `min-height: 501px` is what
+   actually distinguishes this from mobile landscape: phone-landscape
+   widths (e.g. 844x390, 932x430) also fall inside 768-1199px, but their
+   short height keeps them on the mobile-landscape rules below instead
+   (which is what they need — a bottom sheet, not a wide side panel). */
+@media (min-width: 768px) and (max-width: 1199px) and (min-height: 501px) {
+  /* Narrower rather than removed — there's still room for it once the
+     list panel below isn't also fighting it for space. */
+  .about-panel {
+    flex-basis: 260px;
+    padding: 20px 16px;
+  }
+  /* Substantially wider than desktop's fixed 340px, with a floor at that
+     same 340px (proven readable there already) so cards can't shrink
+     below it, and a ceiling so it can't overrun a narrower tablet's
+     width. Sized off `vw` (the real viewport), not a percentage — this
+     element is absolutely positioned inside .map-frame, so a `%` width
+     resolves against .map-frame's own (variable, About-panel-dependent)
+     width instead of the screen, which silently collapsed this back down
+     to the exact same 340px as desktop on some tablet sizes. */
+  .list-panel-outer {
+    width: clamp(340px, 38vw, 460px);
+    max-width: min(460px, calc(100% - 28px));
+  }
+}
+
+/* Tablet portrait specifically (768-820px wide in this range): width
+   alone can't also fit a 260px About sidebar without squeezing map+list
+   right back into the same cramped state the block above exists to fix.
+   Hidden in favor of the same About-button-opens-a-modal pattern mobile
+   already uses, freeing the full width for map + list. Tablet landscape
+   (1024px+ wide) keeps the narrower sidebar from the block above instead —
+   there's enough room for it there. */
+@media (min-width: 768px) and (max-width: 1199px) and (min-height: 501px) and (orientation: portrait) {
+  .about-panel {
+    display: none;
+  }
+  .about-button {
+    display: inline-flex;
+    align-items: center;
+  }
+  /* With the About sidebar gone, .map-frame is close to the full viewport
+     width here — enough to give the list a flat, more generous width than
+     the vw-based landscape sizing above would reach at these narrower
+     (768-820px) tablet widths. */
+  .list-panel-outer {
+    width: 380px;
   }
 }
