@@ -1653,9 +1653,11 @@ body {
   /* Still noticeably larger than the pre-redesign 13px/8px pill, but not
      the full desktop bump — the desktop 14px/15px sizing would eat too much
      of an already-tight phone header row, especially in landscape where
-     vertical space is the scarce resource. */
+     vertical space is the scarce resource. max-width is wide enough to show
+     "Bengaluru" in full (9 characters at this weight/size, plus the native
+     select's own dropdown arrow) — 84px was clipping it. */
   .city-select-inline {
-    max-width: 84px;
+    max-width: 130px;
     padding: 11px 6px 11px 12px;
     font-size: 14px;
   }
@@ -1865,6 +1867,33 @@ body {
   }
   .map-panel {
     padding: 6px;
+  }
+  /* Landscape's search bar reclaims more vertical space than the shared
+     phone sizing above already gives up — smaller still, but "Bengaluru"
+     stays fully visible (city-select-inline's max-width isn't touched here,
+     only its own padding/font). Frees up room for the map/list below, which
+     is what was getting clipped on short landscape frames. */
+  .city-select-inline {
+    padding: 7px 4px 7px 10px;
+    font-size: 12px;
+  }
+  .search-input-inline {
+    padding: 7px 4px;
+    font-size: 12px;
+  }
+  .search-icon-button {
+    padding: 0 10px;
+  }
+  /* Thinner footer so it stops competing with the map/list for the little
+     vertical space a landscape phone has — links stay fully present and
+     tappable, just visually smaller. */
+  .footer {
+    padding: 4px 12px;
+    gap: 3px 8px;
+  }
+  .footer-text,
+  .footer-link {
+    font-size: 10px;
   }
 }
 
