@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
@@ -7,7 +7,6 @@ import { distanceKm } from './lib/distance';
 import MapView from './components/MapView';
 import Logo from './components/Logo';
 import AddListingModal from './components/AddListingModal';
-import ListingDetailModal from './components/ListingDetailModal';
 import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
 import AboutModal from './components/AboutModal';
@@ -32,11 +31,15 @@ const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'
 const MOBILE_PORTRAIT_QUERY = '(max-width: 720px) and (orientation: portrait)';
 
 // Two independent interaction modes, not a continuum: MAP mode (default —
-// the map fills the screen, the sheet is shrunk to just its drag handle
-// plus, if something's selected, the tiny compact card) and LIST mode (the
-// sheet takes over as the primary surface, map "gets out of the way").
-// There is deliberately no third "partial" state — that in-between size was
-// what let the map and list fight over the same screen in the old design.
+// the map fills the screen, the sheet is shrunk to just its drag handle plus
+// a hint pill) and LIST mode (the sheet takes over as the primary surface,
+// map "gets out of the way"). Selecting a listing always shows its details
+// via MapView's own map-anchored popup, never inside the sheet — so
+// selection doesn't add anything to what the sheet itself has to display,
+// it just forces MAP mode if LIST mode was open (see selectListing) so that
+// popup is actually visible. There is deliberately no third "partial" state
+// — that in-between size was what let the map and list fight over the same
+// screen in the old design.
 type SheetState = 'map' | 'list';
 
 function useMediaQuery(query: string) {
@@ -52,10 +55,10 @@ function useMediaQuery(query: string) {
 }
 
 // The MAP-mode snap height is derived from the actual measured height of
-// the sheet's "peek zone" (drag handle + hint pill, or drag handle + the
-// compact selected-listing card) — not a guessed constant — so the sheet is
-// always sized to exactly fit whatever's peeking above it, with zero list
-// content showing through. LIST mode stays a generous fraction of the
+// the sheet's "peek zone" (drag handle + hint pill — a constant, since
+// selection no longer adds anything here) — not a guessed constant — so the
+// sheet is always sized to exactly fit whatever's peeking above it, with
+// zero list content showing through. LIST mode stays a generous fraction of the
 // frame, same idea as before, just without the old "partial" middle step —
 // but capped by `containerHeight - TOP_RESERVE_PX` as a hard ceiling, not
 // just a fraction of the frame. Without that hard cap, a short (landscape)
@@ -88,19 +91,12 @@ export default function App() {
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
+  // Scroll container for the list rows — used to bring the selected row
+  // into view when selection comes from a map-pin click (desktop/tablet/
+  // landscape only; mobile portrait collapses the sheet on selection
+  // instead, so the list isn't even visible at that moment).
   const listPanelRef = useRef<HTMLDivElement>(null);
   const overlayRowRef = useRef<HTMLDivElement>(null);
-  const coverRef = useRef<HTMLDivElement>(null);
-  // The clicked list-card's on-screen top position, captured right before
-  // selecting it — used to animate the detail card "flying" up from that
-  // exact spot into place at the top, instead of just popping into
-  // existence, so it's visually clear the card the user clicked is the one
-  // that moved (see the layout effect below). null when selection came
-  // from a map marker instead, where there's no list position to fly from.
-  // A ref, not state — the layout effect below clears it after reading it,
-  // and doing that via setState would re-trigger the same effect and
-  // cancel its own cleanup timeout before the animation finished.
-  const flyFromTopRef = useRef<number | null>(null);
   // The list panel's hard top boundary needs to land exactly on the
   // search/Contribute row's real rendered bottom edge — not a guessed
   // pixel value, which drifts across browsers/zoom levels/font metrics
@@ -211,6 +207,22 @@ export default function App() {
     [listingsWithDistance, query]
   );
 
+  // Mobile-only list ordering — nearest-first when the viewer's own location
+  // is known, else newest-first. Desktop/tablet/landscape keep `filtered`'s
+  // own order (cheapest-first, from the Supabase query) unchanged. Doesn't
+  // touch pin order on the map (MapView is still fed `filtered` directly) —
+  // order is irrelevant there, only the scrollable list cares.
+  const mobileListListings = useMemo(() => {
+    if (!isMobilePortrait) return filtered;
+    const sorted = [...filtered];
+    if (userLocation) {
+      sorted.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+    } else {
+      sorted.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    }
+    return sorted;
+  }, [filtered, isMobilePortrait, userLocation]);
+
   // Landmark search on the browse map — separate from the substring filter
   // above (runs on every keystroke, no debounce, purely local): this
   // debounces a call out to OLA Places so searching a landmark (not
@@ -257,48 +269,17 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
-  // ListingDetailModal now renders as a plain block above .list-panel (see
-  // .list-panel-outer in styles.css) rather than scrolling with it, so it
-  // can't be scrolled behind/under — but reset .list-panel's own scroll on
-  // selection anyway so the *card list* also starts from its top instead
-  // of wherever it was left scrolled.
+  // Brings the selected listing's row into view when it might be scrolled
+  // off-screen — desktop/tablet/landscape only, where the list stays
+  // visible beside the map at all times. Mobile portrait collapses the
+  // sheet on selection instead (see selectListing below), so the list
+  // isn't even visible at the moment of selection there. `block: 'nearest'`
+  // (no smooth scroll) so this can't fight a user's own in-progress scroll.
   useEffect(() => {
-    if (selectedListingId) {
-      listPanelRef.current?.scrollTo({ top: 0 });
-    }
-  }, [selectedListingId]);
-
-  // FLIP animation: the clicked list-card visibly "flies" from where it
-  // was in the list up into the detail-card slot at the top, instead of
-  // the detail card just appearing there — otherwise it isn't obvious that
-  // the card the user tapped is the one that moved. Runs before paint
-  // (useLayoutEffect) so the starting offset is applied before the browser
-  // ever shows the card at its final position.
-  useLayoutEffect(() => {
-    const fromTop = flyFromTopRef.current;
-    flyFromTopRef.current = null;
-    if (fromTop == null || !selectedListingId) return;
-    const el = coverRef.current;
-    if (!el) return;
-
-    const deltaY = fromTop - el.getBoundingClientRect().top;
-    if (Math.abs(deltaY) < 1) return;
-
-    el.style.transition = 'none';
-    el.style.transform = `translateY(${deltaY}px)`;
-    // Force layout so the browser commits the starting position above
-    // before the transition below is allowed to animate from it.
-    el.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      el.style.transition = 'transform 0.3s ease';
-      el.style.transform = 'translateY(0)';
-    });
-    const cleanup = setTimeout(() => {
-      el.style.transition = '';
-      el.style.transform = '';
-    }, 350);
-    return () => clearTimeout(cleanup);
-  }, [selectedListingId]);
+    if (isMobilePortrait || !selectedListingId) return;
+    const row = listPanelRef.current?.querySelector<HTMLElement>(`[data-listing-id="${selectedListingId}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [selectedListingId, isMobilePortrait]);
 
   // Keeps .list-panel-outer's top edge glued to the overlay row's actual
   // rendered bottom edge — recomputed on resize/wrap (the row can go from
@@ -347,12 +328,12 @@ export default function App() {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Measures `.sheet-peek-zone` — the drag handle plus, on mobile, either
-  // the hint pill or the compact selected-listing card — so MAP mode's
-  // sheet height is always exactly "whatever's peeking above the map",
-  // never a guessed pixel value. Same component/DOM renders this content in
-  // both modes (see the JSX below), so this one measurement is correct
-  // whichever mode is currently active.
+  // Measures `.sheet-peek-zone` — the drag handle plus, on mobile, the hint
+  // pill — so MAP mode's sheet height is always exactly "whatever's peeking
+  // above the map", never a guessed pixel value. This content is now
+  // constant regardless of selection (selection shows its details via
+  // MapView's own popup instead), so this measurement no longer varies
+  // between a listing being selected or not.
   const sheetPeekRef = useRef<HTMLDivElement>(null);
   const [peekHeight, setPeekHeight] = useState(0);
   useEffect(() => {
@@ -372,6 +353,27 @@ export default function App() {
   // .list-panel-outer's `dragging` class toggle below, which turns that
   // transition off only while a drag is actually in progress).
   const appliedSheetHeight = dragHeight ?? sheetSnaps[sheetState];
+
+  // Closes any open popup the moment the user manually expands to LIST mode
+  // (by dragging the handle or tapping the "swipe up" hint — both just set
+  // sheetState, so one effect here covers every entry path). MapView's
+  // popup sits at a higher z-index than the sheet so it can float above the
+  // map (`.map-popup-anchor`, z-index 10, vs. `.list-panel-outer`, z-index
+  // 4) — without this, a popup left open while switching to LIST mode would
+  // keep floating at its last pin-anchored position on top of the now-
+  // expanded list, visually and functionally covering part of it (including
+  // the drag handle itself). Matches the existing convention that the map's
+  // own controls (zoom/locate/click-hint) already hide themselves once LIST
+  // mode makes the map "not the active surface" — the popup is a map
+  // control in the same sense. selectListing's own forced MAP-mode
+  // collapse (which runs in the same tick as setting the selection) means
+  // this never fights a fresh selection — sheetState is already back to
+  // 'map' by the time this effect would otherwise see 'list'.
+  useEffect(() => {
+    if (isMobilePortrait && sheetState === 'list') {
+      setSelectedListingId(null);
+    }
+  }, [sheetState, isMobilePortrait]);
 
   function handleSheetDragStart(e: ReactPointerEvent<HTMLDivElement>) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -453,19 +455,19 @@ export default function App() {
   // Selecting a listing (map marker or list card) shares the exact same
   // camera mechanism as a landmark search — same pan+zoom, same reliability
   // — instead of relying solely on the info-window effect's own panTo.
-  // Opens the full ListingDetailModal pinned at the top of the panel on
-  // every viewport (mobile included) — .list-panel below already excludes
-  // whichever listing is selected, so there's no duplicate card.
+  // Opens the same map-anchored popup (MapView's own, see `hidePopup` below)
+  // on every viewport, mobile included — a map-pin tap and a list-row tap
+  // now always converge on the exact same "full info" surface.
   //
-  // Deliberately never changes `sheetState` — the two mobile towers are
-  // independent of selection. A map-pin tap shows the compact card right
-  // over the map without forcing List mode open; a list-card tap (which can
-  // only happen while already in List mode) just moves that same compact
-  // card to the top of the already-open sheet. See the "peek zone" in the
-  // JSX below, which renders this same compact card in both modes.
+  // On mobile portrait, also forces the sheet back to MAP mode: if a list
+  // tap happened while the sheet was expanded (LIST mode covers most of the
+  // frame), the popup would otherwise render hidden behind it. This is what
+  // makes "tapping a list row opens the same info as tapping a pin" actually
+  // true in practice, not just in theory.
   function selectListing(id: string) {
     setSelectedListingId(id);
     setSearchPin(null);
+    if (isMobilePortrait) setSheetState('map');
     const listing = listings.find((l) => l.id === id);
     if (listing) {
       setFlyToCenter((prev) => ({ center: [listing.longitude, listing.latitude], token: (prev?.token ?? 0) + 1 }));
@@ -607,17 +609,6 @@ export default function App() {
     setSearchPin(null);
   }
 
-  // Only portrait mobile's sheet-peek zone ever renders a full detail card
-  // above the list — desktop/tablet/landscape now show that same
-  // information via MapView's own map-anchored popup instead (see
-  // `hidePopup` on MapView above), so pinning a second copy at the top of
-  // the list panel would just duplicate it — and, worse, could visually
-  // overlap the map popup for a listing whose pin sits near the panel.
-  // Drives `.list-panel-outer`'s `no-selection` class (padding-top for the
-  // list when nothing is pinned above it) — true whenever no cover card is
-  // actually being rendered there, not just when nothing is selected.
-  const showsCoverCard = isMobilePortrait && selectedListingId !== null;
-
   return (
     <div className="app">
       <header className="topbar">
@@ -652,7 +643,11 @@ export default function App() {
               selectedListingId={pickingLocation ? null : selectedListingId}
               onClosePopup={resetToHome}
               onListingUpdated={load}
-              hidePopup={isMobilePortrait || pickingLocation}
+              hidePopup={pickingLocation}
+              selectedDistanceKm={
+                isMobilePortrait ? listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null : null
+              }
+              bottomInset={isMobilePortrait ? appliedSheetHeight : 0}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -728,7 +723,7 @@ export default function App() {
             ) : null}
 
             <div
-              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}${showsCoverCard ? '' : ' no-selection'}`}
+              className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}`}
               style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
             >
               <div className="sheet-peek-zone" ref={sheetPeekRef}>
@@ -746,20 +741,9 @@ export default function App() {
                 </div>
 
                 {isMobilePortrait ? (
-                  selectedListingId ? (
-                    <ListingDetailModal
-                      ref={coverRef}
-                      compact
-                      listingId={selectedListingId}
-                      distanceKm={listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null}
-                      onClose={resetToHome}
-                      onUpdated={load}
-                    />
-                  ) : (
-                    <button type="button" className="sheet-peek-hint" onClick={() => setSheetState('list')}>
-                      Swipe up to browse restaurants <span aria-hidden="true">▲</span>
-                    </button>
-                  )
+                  <button type="button" className="sheet-peek-hint" onClick={() => setSheetState('list')}>
+                    Swipe up to browse restaurants <span aria-hidden="true">▲</span>
+                  </button>
                 ) : null}
               </div>
 
@@ -790,33 +774,29 @@ export default function App() {
                   ) : null
                 ) : null}
 
-                {filtered
-                  .filter((listing) => listing.id !== selectedListingId)
-                  .map((listing) => (
-                    <div
-                      key={listing.id}
-                      className="list-card"
-                      onClick={(e) => {
-                        flyFromTopRef.current = e.currentTarget.getBoundingClientRect().top;
-                        selectListing(listing.id);
-                      }}
-                    >
-                      <div className="list-card-header">
-                        <span className="list-card-name">{listing.name}</span>
-                        <span className="list-card-price">₹{listing.price_rupees}</span>
-                      </div>
-                      {listing.note ? <p className="list-card-note">{listing.note}</p> : null}
-                      <div className="list-card-footer">
-                        <span className="list-card-meta">
-                          <span className="list-card-votes">▲ {listing.voteCount}</span>
-                          {listing.distanceKm != null ? (
-                            <span className="list-card-distance">{listing.distanceKm.toFixed(1)} km away</span>
-                          ) : null}
-                        </span>
-                        <span className="list-card-posted">{formatRelativeTime(listing.created_at)}</span>
-                      </div>
+                {(isMobilePortrait ? mobileListListings : filtered).map((listing) => (
+                  <div
+                    key={listing.id}
+                    data-listing-id={listing.id}
+                    className={`list-card${listing.id === selectedListingId ? ' list-card-selected' : ''}`}
+                    onClick={() => selectListing(listing.id)}
+                  >
+                    <div className="list-card-header">
+                      <span className="list-card-name">{listing.name}</span>
+                      <span className="list-card-price">₹{listing.price_rupees}</span>
                     </div>
-                  ))}
+                    {listing.note ? <p className="list-card-note">{listing.note}</p> : null}
+                    <div className="list-card-footer">
+                      <span className="list-card-meta">
+                        <span className="list-card-votes">▲ {listing.voteCount}</span>
+                        {listing.distanceKm != null ? (
+                          <span className="list-card-distance">{listing.distanceKm.toFixed(1)} km away</span>
+                        ) : null}
+                      </span>
+                      <span className="list-card-posted">{formatRelativeTime(listing.created_at)}</span>
+                    </div>
+                  </div>
+                ))}
               </aside>
             </div>
           </div>

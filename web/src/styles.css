@@ -592,39 +592,29 @@ body {
    white background, so cards read as individually floating over the map
    rather than one opaque sidebar sitting on top of it.
    A plain flex child now (not absolutely positioned) — it fills whatever
-   space .list-panel-outer has left below .listing-cover, and its own
-   overflow-y: auto is what clips cards at that boundary; nothing can
-   render above or behind .listing-cover since that's a separate sibling
-   entirely outside this scroll container, not sharing its stacking.
-   `min-height` (not 0) guarantees the list keeps at least this much of
-   its own visible/scrollable room even on a short mobile bottom sheet —
-   .listing-cover shrinks (and scrolls its own content internally) rather
-   than being allowed to greedily fill the whole sheet and leave nothing
-   of the list visible underneath it. */
+   space .list-panel-outer has left below .sheet-peek-zone (drag handle +
+   hint pill, on mobile), and its own overflow-y: auto is what clips cards
+   at that boundary. `min-height` (not 0) guarantees the list keeps at
+   least this much of its own visible/scrollable room even on a short
+   mobile bottom sheet. Selecting a listing shows its details via MapView's
+   own map-anchored popup, never a card inside this panel, so the top
+   padding below is unconditional — nothing is ever pinned above the list
+   that would otherwise provide that breathing room itself. */
 .list-panel {
   flex: 1;
   min-height: 80px;
   overflow-y: auto;
-  padding: 0 0 16px;
+  padding: 16px 0 16px;
 }
 
-/* Only when nothing is selected (no compact/full card sitting above the
-   list) does .list-panel need its own top breathing room — otherwise
-   .listing-cover's own margin-bottom already provides that spacing. Driven
-   by an explicit modifier class on .list-panel-outer (set in App.tsx)
-   rather than a sibling-combinator on the drag handle, since the handle now
-   always lives inside .sheet-peek-zone alongside the compact card/hint —
-   no longer a direct sibling of .list-panel itself. */
-.list-panel-outer.no-selection > .list-panel {
-  padding-top: 16px;
-}
-
-/* The peek zone — drag handle plus, on mobile, either the hint pill or the
-   compact selected-listing card — never shrinks below its own content.
-   App.tsx measures this element's real rendered height (ResizeObserver) to
-   size MAP mode's sheet height exactly around whatever's peeking above the
-   map, so this must be free to reach its natural size rather than being
-   compressed by the flex column around it. */
+/* The peek zone — drag handle plus, on mobile, the hint pill — never
+   shrinks below its own content. App.tsx measures this element's real
+   rendered height (ResizeObserver) to size MAP mode's sheet height exactly
+   around whatever's peeking above the map, so this must be free to reach
+   its natural size rather than being compressed by the flex column around
+   it. Selecting a listing never adds anything here (its details show via
+   MapView's own map-anchored popup instead), so this stays a constant
+   height regardless of selection. */
 .sheet-peek-zone {
   display: flex;
   flex-direction: column;
@@ -649,19 +639,19 @@ body {
   cursor: pointer;
 }
 
-/* A plain block, sibling of .list-panel inside .list-panel-outer (see
-   App.tsx) — not part of the scrollable list at all, so scrolling cards
-   can never render above, behind, or through it (no shared stacking
-   context to fight over, unlike the earlier sticky-inside-the-scroller
-   approach). Its own overflow-y: auto only matters for its own content
-   (e.g. a long report-reason list) growing past the space available. */
+/* Base styling for the (non-compact) full detail card — in practice only
+   ever rendered as the `compact` variant on web today (`.listing-cover-
+   compact` below adds the dense mobile-popup layout on top of this), inside
+   MapView's own map-anchored popup, a separate DOM subtree from
+   .list-panel entirely. Its own overflow-y: auto only matters for its own
+   content (e.g. a long report-reason list) growing past the space
+   available. */
 .listing-cover {
-  /* Allowed to shrink (the default) rather than pinned at its content
-     size — on a short mobile bottom sheet, this is what lets it give
-     ground to .list-panel's own 80px floor instead of greedily filling
-     the whole sheet and leaving no list visible underneath. Its own
-     overflow-y: auto means shrinking just scrolls its content
-     internally rather than clipping it outright. */
+  /* Allowed to shrink (the default) rather than pinned at its content size
+     — `max-height: 100%` below is the actual constraint (MapView's popup
+     anchor has no fixed height of its own to shrink against), and shrinking
+     just scrolls this card's own content internally (overflow-y: auto)
+     rather than clipping it outright. */
   flex-shrink: 1;
   min-height: 0;
   margin-bottom: 10px;
@@ -672,15 +662,15 @@ body {
   overflow-y: auto;
 }
 
-/* Mobile-web's "tiny complete card" — MAP tower's floating overlay AND
-   LIST tower's pinned top card are the exact same element (see App.tsx),
-   just repositioned by the sheet's own height. Every essential field (name,
-   price, note, freshness, vote, directions, report, delete-own) has to be
-   visible at once with no internal scroll, so this is a dense two-row
-   layout instead of the desktop card's stacked photo/sections. `overflow:
-   visible` (overriding .listing-cover's own overflow-y: auto above) is
-   required so the report popover below can float outside this card's own
-   box instead of being clipped by it. */
+/* The "tiny complete card" used everywhere a listing is selected, on every
+   breakpoint — MapView's one map-anchored popup renders this same compact
+   variant regardless of viewport (see ListingDetailModal's `compact` prop).
+   Every essential field (name, price, note, freshness, vote, directions,
+   report, delete-own) has to be visible at once with no internal scroll, so
+   this is a dense two-row layout instead of the desktop card's stacked
+   photo/sections. `overflow: visible` (overriding .listing-cover's own
+   overflow-y: auto above) is required so the report popover below can float
+   outside this card's own box instead of being clipped by it. */
 .listing-cover-compact {
   padding: 10px 12px 8px;
   overflow: visible;
@@ -883,6 +873,14 @@ body {
   background: var(--pink-accent-soft);
 }
 
+.compact-report-feedback {
+  margin: 0;
+  padding: 7px 8px;
+  font-size: 12px;
+  color: #333;
+  max-width: 180px;
+}
+
 /* A compact, consistent price tag rather than a free-floating solid pill —
    white card, black type, a thin pink border, and a small diamond "tail"
    pointing at the exact coordinate (::after below) so it reads unambiguously
@@ -997,7 +995,7 @@ body {
 }
 
 /* The compact card's own white background/rounded corners/shadow (needed
-   when it's floating directly over the map in the mobile sheet) would
+   when it's used elsewhere without a surrounding frame of its own) would
    double up with .map-popup-card's own matching chrome here — one card
    visibly nested inside another. The popup card already provides that
    frame (background/radius/shadow/tail above), so the card inside it is
@@ -1069,6 +1067,16 @@ body {
   border-color: var(--pink-accent);
   box-shadow: 0 0 0 3px var(--pink-accent-soft), 0 6px 18px rgba(236, 72, 153, 0.15);
   transform: translateY(-1px);
+}
+
+/* The currently selected listing's row — same "called out in pink" treatment
+   as .map-pin-selected, so the highlight reads as one consistent language
+   across the map and the list. No size/padding change (unlike the hover
+   lift above) so selecting a row can't shift the list's own scroll
+   position. */
+.list-card-selected {
+  border-color: var(--pink-accent);
+  box-shadow: 0 0 0 2px var(--pink-accent-soft), 0 6px 18px rgba(236, 72, 153, 0.15);
 }
 
 .list-card-header {
@@ -1463,6 +1471,12 @@ body {
   margin-top: 12px;
 }
 
+.report-feedback {
+  margin: 0;
+  font-size: 14px;
+  color: #333;
+}
+
 .section-title {
   margin-top: 24px;
   font-size: 15px;
@@ -1696,8 +1710,7 @@ body {
    when width is the scarce resource (portrait), not when there's already
    comfortable side-by-side room (landscape). This query must stay in sync
    with MOBILE_PORTRAIT_QUERY in App.tsx — same string, same intent — since
-   the JS reads it to decide whether to render the compact card / sheet-peek
-   hint at all. */
+   the JS reads it to decide whether to render the sheet-peek hint at all. */
 @media (max-width: 720px) and (orientation: portrait) {
   /* Draggable bottom sheet — height is driven by the `--sheet-h` custom
      property (set inline on .map-frame from App.tsx's sheetState/drag
@@ -1755,11 +1768,11 @@ body {
     background: #ddd;
   }
   /* LIST mode's scrolling cards are deliberately minimal — name, price,
-     vote count, distance, freshness only (the full note/description lives
-     on the one compact card pinned at the top of the sheet, not repeated
-     per row) — so browsing stays dense and scannable rather than each row
-     trying to be a mini detail card. Landscape's side panel is roomier and
-     shows notes normally, same as desktop/tablet. */
+     vote count, distance, freshness only (the full note/description shows
+     in the map-anchored popup once a listing is actually selected, not
+     repeated per row here) — so browsing stays dense and scannable rather
+     than each row trying to be a mini detail card. Landscape's side panel
+     is roomier and shows notes normally, same as desktop/tablet. */
   .list-card-note {
     display: none;
   }
@@ -1798,10 +1811,12 @@ body {
   .map-frame.list-mode-active .map-click-hint {
     display: none;
   }
-  /* MAP mode's sheet height is measured to exactly fit the compact card's
-     own content (see .sheet-peek-zone/sheetPeekRef in App.tsx) — no
-     min-height needed here to stop it shrinking; the compact card's own
-     padding/line-clamps already guarantee it never needs internal scroll. */
+  /* MAP mode's collapsed sheet height is measured to exactly fit
+     .sheet-peek-zone's own content — just the drag handle + hint pill (see
+     sheetPeekRef in App.tsx). Without overriding the base rule's 80px
+     min-height here, MAP mode's tiny peek strip would be forced to reserve
+     that much room for .list-panel too, defeating the point of collapsing
+     down to a small peek in the first place. */
   .list-panel {
     min-height: 0;
   }

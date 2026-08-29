@@ -29,10 +29,21 @@ type Props = {
   // listing) so the caller's own listings reload the same way it already
   // does for the side-panel's card.
   onListingUpdated?: () => void;
-  // True on portrait mobile only, where App.tsx already renders this exact
-  // same compact card in its own bottom-sheet peek zone — showing it a
-  // second time, anchored to the pin, would just duplicate that.
+  // Only ever true while the caller is in the "pick a location for a new
+  // listing" flow, where selection is repurposed for placing a pin rather
+  // than browsing — the popup would be meaningless (and confusing) mid-pick.
   hidePopup?: boolean;
+  // The selected listing's distance from the viewer, in km — App.tsx only
+  // ever passes this on mobile portrait (desktop/tablet/landscape pass null,
+  // preserving the existing "desktop never shows distance" rule); threaded
+  // straight into the popup's own compact card.
+  selectedDistanceKm?: number | null;
+  // Pixels reserved at the bottom of the map container that the popup must
+  // not render underneath — mobile's bottom sheet, in practice (0 elsewhere).
+  // Read live via a ref inside the popup-position RAF loop below, not baked
+  // into that effect's own deps, since it changes continuously while a user
+  // drags the sheet.
+  bottomInset?: number;
 };
 
 export default function MapView({
@@ -46,6 +57,8 @@ export default function MapView({
   onClosePopup,
   onListingUpdated,
   hidePopup,
+  selectedDistanceKm,
+  bottomInset,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -90,6 +103,15 @@ export default function MapView({
   useEffect(() => {
     onMapClickRef.current = onMapClick;
   }, [onMapClick]);
+
+  // Same pattern as onMapClickRef above — read inside the popup-position RAF
+  // loop rather than added to that effect's own deps, since it changes
+  // continuously while a user drags the mobile bottom sheet with a popup
+  // open, and that loop must see the live value without remounting.
+  const bottomInsetRef = useRef(bottomInset ?? 0);
+  useEffect(() => {
+    bottomInsetRef.current = bottomInset ?? 0;
+  }, [bottomInset]);
 
   useEffect(() => {
     if (!containerRef.current || !hasKey) return;
@@ -342,9 +364,9 @@ export default function MapView({
   // Re-measures every animation frame while a popup is open — pan/zoom
   // isn't accompanied by a discrete "moved" event we can rely on (the pin
   // itself just glides continuously), so this is what keeps the popup
-  // glued to it. Skipped on portrait mobile (hidePopup) — App.tsx already
-  // shows this same card in its bottom-sheet peek zone there, so a second
-  // copy anchored to the pin would just be a duplicate.
+  // glued to it. Skipped only while picking a location for a new listing
+  // (hidePopup) — selection is repurposed there, so a popup would be
+  // meaningless mid-pick.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || mapLoading) return;
@@ -365,18 +387,21 @@ export default function MapView({
       if (pinEl && containerEl) {
         const pinRect = pinEl.getBoundingClientRect();
         const containerRect = containerEl.getBoundingClientRect();
+        // Google's InfoWindow used to auto-pan the map so a popup near the
+        // viewport edge always stayed fully visible — a plain positioned div
+        // has no equivalent, so this clamps both edges by hand instead:
+        // a top floor (a pin close to the top of a short frame, routine in
+        // mobile-landscape, could otherwise open the card underneath the
+        // search bar) and a bottom ceiling (mobile's bottom sheet, via
+        // bottomInsetRef — without this, a pin near the bottom of the
+        // visible map could open its popup partially behind the sheet). The
+        // tail just won't perfectly meet the pin in either clamped case,
+        // which is a minor, rare tradeoff against actually being obscured.
+        const topClamp = 190;
+        const maxY = Math.max(containerRect.height - bottomInsetRef.current - 12, topClamp);
         setPopupPosition({
           x: pinRect.left + pinRect.width / 2 - containerRect.left,
-          // Google's InfoWindow used to auto-pan the map so a popup near the
-          // viewport edge always stayed fully visible — a plain positioned
-          // div has no equivalent, so a pin close to the top of a short
-          // frame (routine in mobile-landscape, where the whole frame can
-          // be well under 400px tall) could otherwise open the card
-          // underneath the search bar. Clamping to a minimum keeps the
-          // whole card below that row; the tail just won't perfectly meet
-          // the pin in that specific case, which is a minor, rare tradeoff
-          // against actually being obscured.
-          y: Math.max(pinRect.top - containerRect.top, 190),
+          y: Math.min(Math.max(pinRect.top - containerRect.top, topClamp), maxY),
         });
       }
       popupRafRef.current = requestAnimationFrame(measure);
@@ -507,6 +532,7 @@ export default function MapView({
             <ListingDetailModal
               compact
               listingId={selectedListingId}
+              distanceKm={selectedDistanceKm ?? null}
               onClose={() => onClosePopup?.()}
               onUpdated={onListingUpdated}
             />
