@@ -7,14 +7,57 @@ export default function AboutContent() {
         <Logo size={60} />
         <span className="about-logo-word">Beggars Map</span>
       </div>
-      <p className="about-lead">A community of people who know that a great meal doesn't have to cost a fortune. Every listing is ₹100 or less.</p>
-      <p className="about-body">We call ourselves the Beggars because we believe in asking a simple question: <strong>where does ₹100 go furthest?</strong></p>
-      <p className="about-body">Bengaluru is full of places serving honest, satisfying food at prices that make sense. The problem isn't always finding food. It's finding the <strong>good stuff</strong> without spending half your wallet discovering it.</p>
-      <p className="about-body">That's where Beggars Map comes in.</p>
-      <p className="about-body">We share the places we know, rate the food we've tried, and help each other discover meals worth every rupee. No fancy marketing. No paid rankings. Just people sharing what they've found.</p>
-      <p className="about-body"><strong>No partnerships. No sponsored listings. No paid placements.</strong> Every spot on Beggars Map comes from the community, and the community decides what deserves attention.</p>
-      <p className="about-body">Because ₹100 is ₹100. Whether you're a student, a traveller, a working professional, or simply someone who refuses to overpay for lunch, <strong>every rupee counts.</strong></p>
-      <p className="about-tagline">Find it. Eat it. Rate it. Pass it on.</p>
+
+      <h2 className="about-lead">About Us</h2>
+      <p className="about-body">
+        <strong>Great food, ₹100 or less.</strong>
+        <br />
+        A map of Bengaluru’s most affordable eats, built by the people who eat there.
+      </p>
+      <p className="about-body">
+        <strong>Tastiest. Healthiest. Best value for money.</strong>
+        <br />
+        Affordable shouldn’t mean settling for less.
+      </p>
+      <p className="about-body">
+        <strong>One rule: ₹100.</strong>
+        <br />
+        If it costs more, it doesn’t go on the map.
+      </p>
+      <p className="about-body">
+        <strong>Nothing here is for sale.</strong>
+        <br />
+        No ads. No promoted spots. No paying your way to the top.
+      </p>
+
+      <h2 className="about-lead">A Message to Our Community</h2>
+      <p className="about-body">
+        <strong>This map runs on you.</strong>
+        <br />
+        Every listing came from someone who took a minute to add it.
+      </p>
+      <p className="about-body">
+        <strong>Tastiest? Healthiest? Best value for money? Under ₹100?</strong>
+        <br />
+        Then it belongs on the map. <strong>Add it.</strong>
+      </p>
+      <p className="about-body">
+        <strong>Found a ₹60 breakfast? An ₹80 thali?</strong>
+        <br />
+        Put it on the map. It takes a minute.
+      </p>
+      <p className="about-body">
+        <strong>Prices change. Places close.</strong>
+        <br />
+        If something is out of date, fix it. That’s what keeps this useful for everyone.
+      </p>
+      <p className="about-body">
+        <strong>You don’t need to be a critic.</strong>
+        <br />
+        Just know good value when you find it.
+      </p>
+
+      <p className="about-tagline">Found by the community. Kept true by the community.</p>
     </>
   );
 }

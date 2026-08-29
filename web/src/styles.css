@@ -148,6 +148,14 @@ body {
   flex-shrink: 0;
 }
 
+/* Chromium/Edge draw a default 1px black focus outline on a bare <select>
+   (this element has no border of its own, so nothing was masking it) —
+   selecting/clicking it left a hard black box around the city pill that
+   was never part of the design. */
+.city-select-inline:focus {
+  outline: none;
+}
+
 .search-bar-divider {
   width: 1px;
   align-self: stretch;
@@ -1714,6 +1722,31 @@ body {
    with MOBILE_PORTRAIT_QUERY in App.tsx — same string, same intent — since
    the JS reads it to decide whether to render the sheet-peek hint at all. */
 @media (max-width: 720px) and (orientation: portrait) {
+  /* Portrait is narrow enough that the search bar and "+ Add" sharing one
+     row (the shared phone layout above) crushed the search input down to a
+     few visible characters. Stacking them — search bar full width on its
+     own row, Add button on a second row — gives the search bar the whole
+     width and keeps Add reachable without fighting it for space. Overrides
+     the base .map-overlay-row's `align-items: center` (which would center
+     the row's cross-axis / horizontal width instead of stretching it), so
+     the search bar can stretch full width like the rest of this layout. */
+  .map-overlay-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .map-overlay-row .contribute-button,
+  .map-overlay-row .map-picking-cancel {
+    align-self: flex-end;
+  }
+  /* Static (not JS-measured, see sidePanelTop's effect skipping portrait)
+     — the search-results dropdown's own top offset was tuned for the old
+     single-row overlay; the second (Add button) row now pushes the row's
+     real bottom further down, so this needs a matching bump to keep the
+     dropdown from opening underneath/overlapping that row. */
+  .map-search-results {
+    top: 108px;
+  }
   /* Draggable bottom sheet — height is driven by the `--sheet-h` custom
      property (set inline on .map-frame from App.tsx's sheetState/drag
      handlers), with a small fallback (just enough for the drag handle) for
@@ -1867,6 +1900,19 @@ body {
   }
   .map-panel {
     padding: 6px;
+  }
+  /* The shared phone rule above (.search-bar { flex: 1 1 auto; max-width:
+     none }) is what portrait needs — full width, since it's the only thing
+     on its row — but landscape has plenty of side-by-side room, and without
+     its own cap here the search bar was stretching to fill nearly the
+     entire row, squeezing "+ Add" down to a sliver on the right. Capping
+     the basis/max-width here (in addition to the font/padding reduction
+     below, which only shrank the *contents*, not the container) is what
+     actually makes the bar shorter, leaving real gap before the Add
+     button via the row's existing `justify-content: space-between`. */
+  .search-bar {
+    flex: 0 1 320px;
+    max-width: 55%;
   }
   /* Landscape's search bar reclaims more vertical space than the shared
      phone sizing above already gives up — smaller still, but "Bengaluru"

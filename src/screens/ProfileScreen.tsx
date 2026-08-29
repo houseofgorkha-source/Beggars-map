@@ -12,34 +12,47 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 function AboutSection() {
   return (
     <View style={styles.about}>
-      <Text style={styles.aboutTitle}>About Beggars Map</Text>
-      <Text style={styles.aboutLead}>
-        A community of people who know that a great meal doesn't have to cost a fortune. Every listing is ₹100 or
-        less.
+      <Text style={styles.aboutTitle}>About Us</Text>
+      <Text style={styles.aboutBody}>
+        <Text style={styles.aboutBold}>Great food, ₹100 or less.</Text>
+        {'\n'}A map of Bengaluru’s most affordable eats, built by the people who eat there.
       </Text>
       <Text style={styles.aboutBody}>
-        We call ourselves the Beggars because we believe in asking a simple question:{' '}
-        <Text style={styles.aboutBold}>where does ₹100 go furthest?</Text>
+        <Text style={styles.aboutBold}>Tastiest. Healthiest. Best value for money.</Text>
+        {'\n'}Affordable shouldn’t mean settling for less.
       </Text>
       <Text style={styles.aboutBody}>
-        Bengaluru is full of places serving honest, satisfying food at prices that make sense. The problem isn't
-        always finding food. It's finding the <Text style={styles.aboutBold}>good stuff</Text> without spending
-        half your wallet discovering it.
-      </Text>
-      <Text style={styles.aboutBody}>That's where Beggars Map comes in.</Text>
-      <Text style={styles.aboutBody}>
-        We share the places we know, rate the food we've tried, and help each other discover meals worth every
-        rupee. No fancy marketing. No paid rankings. Just people sharing what they've found.
+        <Text style={styles.aboutBold}>One rule: ₹100.</Text>
+        {'\n'}If it costs more, it doesn’t go on the map.
       </Text>
       <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>No partnerships. No sponsored listings. No paid placements.</Text> Every
-        spot on Beggars Map comes from the community, and the community decides what deserves attention.
+        <Text style={styles.aboutBold}>Nothing here is for sale.</Text>
+        {'\n'}No ads. No promoted spots. No paying your way to the top.
+      </Text>
+
+      <Text style={styles.aboutTitle}>A Message to Our Community</Text>
+      <Text style={styles.aboutBody}>
+        <Text style={styles.aboutBold}>This map runs on you.</Text>
+        {'\n'}Every listing came from someone who took a minute to add it.
       </Text>
       <Text style={styles.aboutBody}>
-        Because ₹100 is ₹100. Whether you're a student, a traveller, a working professional, or simply someone
-        who refuses to overpay for lunch, <Text style={styles.aboutBold}>every rupee counts.</Text>
+        <Text style={styles.aboutBold}>Tastiest? Healthiest? Best value for money? Under ₹100?</Text>
+        {'\n'}Then it belongs on the map. <Text style={styles.aboutBold}>Add it.</Text>
       </Text>
-      <Text style={styles.aboutTagline}>Find it. Eat it. Rate it. Pass it on.</Text>
+      <Text style={styles.aboutBody}>
+        <Text style={styles.aboutBold}>Found a ₹60 breakfast? An ₹80 thali?</Text>
+        {'\n'}Put it on the map. It takes a minute.
+      </Text>
+      <Text style={styles.aboutBody}>
+        <Text style={styles.aboutBold}>Prices change. Places close.</Text>
+        {'\n'}If something is out of date, fix it. That’s what keeps this useful for everyone.
+      </Text>
+      <Text style={styles.aboutBody}>
+        <Text style={styles.aboutBold}>You don’t need to be a critic.</Text>
+        {'\n'}Just know good value when you find it.
+      </Text>
+
+      <Text style={styles.aboutTagline}>Found by the community. Kept true by the community.</Text>
       <Text style={styles.comingSoon}>Launching soon in Delhi, Mumbai, Kolkata, Chennai, Guwahati and more</Text>
     </View>
   );
