@@ -65,6 +65,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   const [voteCount, setVoteCount] = useState(0);
   const [hasVoted, setHasVoted] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [reportFeedback, setReportFeedback] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const reportWrapRef = useRef<HTMLDivElement>(null);
@@ -139,21 +140,31 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   async function reportListing(reason: string) {
     const userId = await ensureAnonymousSession();
     if (!userId) {
-      window.alert('Could not start a session. Please refresh and try again.');
+      setReportFeedback('Could not start a session. Please refresh and try again.');
       return;
     }
     const { error: reportError } = await supabase.from('reports').insert({ listing_id: listingId, reported_by: userId, reason });
     if (reportError) {
       if (reportError.code === '23505') {
-        setReporting(false);
-        window.alert("You've already reported this listing for that reason.");
+        setReportFeedback("You've already reported this listing for that reason.");
         return;
       }
-      window.alert(`Could not send report: ${reportError.message}`);
+      setReportFeedback(`Could not send report: ${reportError.message}`);
       return;
     }
-    setReporting(false);
-    window.alert('Thanks — this has been reported.');
+    // Shown inline rather than via window.alert — a blocking native dialog
+    // is easy to miss (and gets silently no-op'd in some embedded/webview
+    // browser contexts), which read as "nothing happens" when reporting.
+    setReportFeedback('Thanks — this has been reported.');
+    setTimeout(() => {
+      setReporting(false);
+      setReportFeedback(null);
+    }, 1800);
+  }
+
+  function toggleReporting() {
+    setReporting((r) => !r);
+    setReportFeedback(null);
   }
 
   async function deleteListing() {
@@ -231,24 +242,29 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             <button className={`compact-vote ${hasVoted ? 'active' : ''}`} onClick={toggleVote} aria-label="Worth it">
               ▲ {voteCount}
             </button>
-            <button className="compact-icon-button" onClick={openDirections} aria-label="Directions">
+            <button className="compact-icon-button" onClick={openDirections} aria-label="Directions" title="Directions">
               <DirectionsIcon />
             </button>
             <div className="compact-report-wrap" ref={reportWrapRef}>
               <button
                 className="compact-icon-button compact-report-trigger"
-                onClick={() => setReporting((r) => !r)}
+                onClick={toggleReporting}
                 aria-label="Report"
+                title="Report"
               >
                 <FlagIcon />
               </button>
               {reporting ? (
                 <div className="compact-report-popover">
-                  {REPORT_REASONS.map((reason) => (
-                    <button key={reason} className="compact-report-reason" onClick={() => reportListing(reason)}>
-                      {reason}
-                    </button>
-                  ))}
+                  {reportFeedback ? (
+                    <p className="compact-report-feedback">{reportFeedback}</p>
+                  ) : (
+                    REPORT_REASONS.map((reason) => (
+                      <button key={reason} className="compact-report-reason" onClick={() => reportListing(reason)}>
+                        {reason}
+                      </button>
+                    ))
+                  )}
                 </div>
               ) : null}
             </div>
@@ -283,8 +299,8 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             <button className={`vote-button ${hasVoted ? 'active' : ''}`} onClick={toggleVote}>
               ▲ Worth it ({voteCount})
             </button>
-            <button className="secondary-button" onClick={openDirections}>Directions</button>
-            <button className="report-button" onClick={() => setReporting(true)}>Report</button>
+            <button className="secondary-button" onClick={openDirections} title="Directions">Directions</button>
+            <button className="report-button" onClick={() => { setReporting(true); setReportFeedback(null); }} title="Report">Report</button>
           </div>
 
           {myUserId && listing.created_by === myUserId ? (
@@ -293,11 +309,15 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
 
           {reporting ? (
             <div className="report-panel">
-              {REPORT_REASONS.map((reason) => (
-                <button key={reason} className="secondary-button" onClick={() => reportListing(reason)}>
-                  {reason}
-                </button>
-              ))}
+              {reportFeedback ? (
+                <p className="report-feedback">{reportFeedback}</p>
+              ) : (
+                REPORT_REASONS.map((reason) => (
+                  <button key={reason} className="secondary-button" onClick={() => reportListing(reason)}>
+                    {reason}
+                  </button>
+                ))
+              )}
               <button className="text-button" onClick={() => setReporting(false)}>Cancel</button>
             </div>
           ) : null}
