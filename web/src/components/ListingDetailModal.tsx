@@ -229,6 +229,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
               <span className="compact-price">₹{listing.price_rupees}</span>
             </div>
             {listing.note ? <p className="compact-note">{listing.note}</p> : null}
+            {listing.location_label ? <p className="compact-location">{listing.location_label}</p> : null}
           </div>
           <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
         </div>

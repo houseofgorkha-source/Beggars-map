@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
+import { reverseGeocode } from '../lib/reverseGeocode';
 
 type Props = {
   onClose: () => void;
@@ -35,6 +36,15 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(initialCoords ?? null);
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
+  // Resolved from `coords` via reverse geocoding — a human-readable
+  // descriptor ("100 Feet Road, Indiranagar") shown to the user for
+  // confidence and submitted alongside the exact lat/lon, which stays the
+  // authoritative location regardless of whether this resolves to anything.
+  // Re-resolved (see the effect below) every time coords changes, since
+  // each location source (GPS, map pick, pasted link) can update coords
+  // independently at any point before submission.
+  const [locationLabel, setLocationLabel] = useState<string | null>(null);
+  const [resolvingLocation, setResolvingLocation] = useState(false);
 
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
@@ -55,6 +65,29 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     setLocationMode('current');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedLocation?.token]);
+
+  // Resolves a human-readable descriptor for whatever coords are currently
+  // set, from any of the three location sources. Clears any previous
+  // label immediately (not just on the async response) — submitting while
+  // a fresh lookup is still in flight must send null rather than the prior
+  // location's now-stale descriptor; null is always safe here (it just
+  // means no descriptor yet), a mismatched one would not be. `cancelled`
+  // additionally drops a resolved result if coords changed again before it
+  // arrived, for the same reason.
+  useEffect(() => {
+    setLocationLabel(null);
+    if (!coords) return;
+    let cancelled = false;
+    setResolvingLocation(true);
+    reverseGeocode(coords.lat, coords.lon).then((label) => {
+      if (cancelled) return;
+      setLocationLabel(label);
+      setResolvingLocation(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coords]);
 
   // Hands the GPS fix off to the same full-screen map confirmation "Pick on
   // map" uses, instead of applying it straight to `coords` — GPS can be off
@@ -133,7 +166,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     if (!coords) return setError('Set a location using one of the options below.');
     const foodCheck = checkFoodRelevance(name, note);
     if (!foodCheck.ok) {
-      return setError(`Beggars Map is for cheap eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
+      return setError(`Beggars Map is for affordable eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
     }
 
     setSubmitting(true);
@@ -160,6 +193,10 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           photo_url: photos[0]?.url ?? null,
           latitude: coords.lat,
           longitude: coords.lon,
+          // Best-effort human-readable descriptor for the same coords —
+          // null when reverse geocoding hasn't resolved (or found) anything
+          // by submission time, never a placeholder/fabricated value.
+          location_label: locationLabel,
         })
         .select('id')
         .single();
@@ -259,7 +296,14 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
 
           <label className="field-label">Location</label>
           {coords ? (
-            <div className="pinned-banner">Pinned ✓ ({coords.lat.toFixed(4)}, {coords.lon.toFixed(4)})</div>
+            <div className="pinned-banner">
+              Pinned ✓ ({coords.lat.toFixed(4)}, {coords.lon.toFixed(4)})
+              {resolvingLocation ? (
+                <span className="pinned-location pinned-location-resolving">Finding the address…</span>
+              ) : locationLabel ? (
+                <span className="pinned-location">{locationLabel}</span>
+              ) : null}
+            </div>
           ) : null}
 
           <div className="location-tabs">

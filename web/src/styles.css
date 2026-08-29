@@ -45,6 +45,12 @@ body {
   background: #fff;
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.01em;
+  /* Stops mobile Chrome's native pull-to-refresh from competing with the
+     double-swipe-down home-exit gesture (App.tsx's handleHomeTouchStart/
+     End) — without this, a downward swipe at the top of the page could
+     trigger a page reload instead of (or as well as) being read as our own
+     gesture. */
+  overscroll-behavior-y: contain;
 }
 
 .app {
@@ -186,6 +192,50 @@ body {
   align-items: center;
 }
 
+/* Swaps in for the search icon once there's text to clear — the one
+   always-available way to back out of a search (typed text, narrowed
+   list/map, any open suggestion dropdown) without picking a result. Same
+   footprint/position as .search-icon-button so the swap doesn't shift the
+   bar's width. */
+.search-clear-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  padding: 0 16px;
+  height: 100%;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.search-clear-button:hover {
+  color: #666;
+}
+
+/* Best-effort feedback for the double-swipe-down exit gesture (see
+   attemptHomeExit in App.tsx) — a web page can't silently succeed or fail
+   at closing its own tab/app, so this always says what happened (handed
+   off to browser back-history) or, if there's nowhere to go back to, that
+   a page genuinely can't do more than that. Auto-dismisses itself. */
+.home-exit-toast {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  max-width: min(320px, calc(100% - 40px));
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  padding: 10px 16px;
+  border-radius: 12px;
+  pointer-events: none;
+}
+
 .map-search-results {
   position: absolute;
   top: 50px;
@@ -244,11 +294,21 @@ body {
   display: none;
 }
 
+/* Section headers ("About Us", "A Message to Our Community") — bumped up
+   from body-text weight so they clearly read as headers rather than just
+   another bold line, using the same brand pink as .about-tagline/prices/
+   buttons elsewhere rather than a new color. Uppercase + a little letter-
+   spacing gives it a distinct "headline" texture from the bold inline
+   lead-ins inside .about-body (`.about-body strong`, plain black), which
+   is the actual hierarchy problem being fixed — not a full redesign, just
+   this one rule. */
 .about-lead {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: #333;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--pink-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   margin: 0 0 14px;
 }
 
@@ -741,6 +801,20 @@ body {
   overflow: hidden;
 }
 
+/* The resolved human-readable location descriptor (see reverseGeocode.ts)
+   — one line, visually lighter/smaller than the note so it reads as a
+   supporting detail rather than competing with it. Absent entirely for a
+   listing geocoding couldn't resolve anything for, never a placeholder. */
+.compact-location {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .compact-close {
   flex-shrink: 0;
   background: none;
@@ -955,19 +1029,32 @@ body {
    Google InfoWindow, specifically so it can sit at a normal z-index as a
    true sibling of .list-panel-outer instead of nested inside Google's own
    map panes (which bundle base tiles and every overlay under one shared
-   stacking rank from any sibling's point of view — no z-index there could
-   put a popup above the side panel without the base map tiles coming along
-   with it). `.map-popup-anchor` is positioned via an inline transform set
-   from the tracked pixel coordinates (translate, not left/top, to avoid
-   layout thrash on every pan/zoom frame); `.map-popup-card` then shifts
-   itself up and centered from that anchor point via a second, static
-   transform — kept as two elements so the two transforms don't have to be
-   combined into one dynamically-computed string in JS. */
+   stacking rank from any sibling's point of view — no CSS z-index there
+   could separate a popup from the base map tiles it's rendered alongside).
+   `.map-popup-anchor` is positioned via an inline transform set from the
+   tracked pixel coordinates (translate, not left/top, to avoid layout
+   thrash on every pan/zoom frame); `.map-popup-card` then shifts itself up
+   and centered from that anchor point via a second, static transform —
+   kept as two elements so the two transforms don't have to be combined
+   into one dynamically-computed string in JS.
+
+   z-index: 3 is deliberately BELOW .list-panel-outer's 4 (unchanged from
+   its original value) — the list must stay the fully visible, fully
+   clickable surface wherever an exactly-pin-anchored popup (no boundary
+   clamp, see MapView.tsx) would otherwise render underneath it. Chosen as
+   the lowest change that achieves this: raising .list-panel-outer instead
+   would have also reordered it above every other floating control
+   (.map-overlay-row/.map-search-results/.picking-dialog/the zoom+locate
+   buttons/.home-exit-toast, all z-index 5–8) that was already correctly
+   above it before — confirmed to actually break the picking-location
+   dialog's own confirm button on tablet widths. Moving only the popup
+   down, below its own original 10 but still above ordinary map pins
+   (unset/auto), touches nothing else's relative order. */
 .map-popup-anchor {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 10;
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -1340,6 +1427,22 @@ body {
   border-radius: 10px;
   padding: 10px 12px;
   margin-bottom: 8px;
+}
+
+/* The resolved human-readable descriptor (or a "resolving" placeholder),
+   shown as a lighter, unbolded second line under the exact coordinates so
+   it reads as a confirmation detail, not a second equally-weighted fact. */
+.pinned-location {
+  display: block;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: #c23e79;
+  margin-top: 2px;
+}
+
+.pinned-location-resolving {
+  color: #d488ab;
+  font-style: italic;
 }
 
 .location-tabs {

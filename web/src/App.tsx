@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
 import { formatRelativeTime } from './lib/relativeTime';
@@ -20,6 +20,23 @@ type ListingWithVotes = Listing & { voteCount: number };
 type ListingWithDistance = ListingWithVotes & { distanceKm: number | null };
 
 const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'];
+
+// A query that doesn't match any listing by name/note is tried as an
+// area/locality name instead (see the search effect below): OLA Places
+// resolves it to a coordinate (reusing the same landmark-search call this
+// app already makes, purely as a geocoder — its results are never shown to
+// the user as selectable places in this path), and any of our own listings
+// within this radius count as "in" that area. Bengaluru localities are
+// typically a couple of km across, so this stays generous enough to catch
+// a real match without pulling in listings from a clearly different area.
+const AREA_MATCH_RADIUS_KM = 3;
+
+// A fast, single-direction downward drag, measured the same way the sheet
+// drag gesture measures its own pointer movement (distance + elapsed time)
+// — see the home-exit touch handlers below.
+const HOME_SWIPE_MIN_DISTANCE_PX = 70;
+const HOME_SWIPE_MAX_DURATION_MS = 600;
+const HOME_DOUBLE_SWIPE_WINDOW_MS = 900;
 
 // Portrait phones only — landscape phones/tablets deliberately use the
 // desktop-style side panel instead of the MAP/LIST bottom sheet (see the
@@ -88,6 +105,11 @@ export default function App() {
 
   const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
+  // Populated by the search effect below when the typed query matches no
+  // listing by name/note but does resolve to a nearby area (see
+  // AREA_MATCH_RADIUS_KM) — these are our own listings, not external
+  // places, so they flow into `filtered` the same way a name match does.
+  const [areaListings, setAreaListings] = useState<ListingWithDistance[]>([]);
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
@@ -115,20 +137,19 @@ export default function App() {
   // fresh — using stale state there produced visible jitter.
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const [frameHeight, setFrameHeight] = useState(0);
-  // The list panel's own outer container — measured (not CSS-math-guessed,
-  // same philosophy as frameHeight/sidePanelTop above) so MapView's popup can
-  // clamp itself to never render underneath it. Only meaningful on
-  // desktop/tablet/landscape, where the list floats as a side panel over the
-  // map; on mobile portrait it becomes a full-width bottom sheet instead, so
-  // there's no horizontal boundary to keep the popup clear of there — see
-  // rightInset below.
-  const listPanelOuterRef = useRef<HTMLDivElement>(null);
-  const [rightInset, setRightInset] = useState(0);
   const [sheetState, setSheetState] = useState<SheetState>('map');
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const dragHeightRef = useRef<number | null>(null);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
   const dragStartRef = useRef<{ startY: number; startHeight: number; lastY: number; lastT: number; velocity: number } | null>(null);
+  // Mobile-only double-swipe-down-to-exit (see handleHomeTouchStart/End
+  // below) — tracked entirely separately from the sheet's own drag gesture
+  // (dragStartRef above), which lives on the drag handle specifically and
+  // is explicitly excluded from this one's eligible touch targets.
+  const homeSwipeStartRef = useRef<{ y: number; t: number } | null>(null);
+  const firstHomeSwipeAtRef = useRef<number | null>(null);
+  const [homeExitNotice, setHomeExitNotice] = useState<string | null>(null);
+  const homeExitNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Selecting a result sets `query` to the place name to show it in the box —
   // that alone would re-trigger the debounced autocomplete effect below and
   // pop the dropdown back open a moment later. This flag tells that effect
@@ -204,44 +225,105 @@ export default function App() {
     [listings, userLocation]
   );
 
-  // Memoized so this array's identity only changes when listings or the
-  // query actually change — MapView re-fits the camera to it whenever the
-  // reference changes, so a stable reference across unrelated re-renders
-  // (e.g. the results-dropdown open/close state) stops that refit from
-  // firing and stomping on an in-progress flyToCenter animation. Declared
-  // before the search effect below, which reads filtered.length to decide
-  // whether an external search is even needed.
-  const filtered = useMemo(
-    () => listingsWithDistance.filter((l) => l.name.toLowerCase().includes(query.toLowerCase())),
-    [listingsWithDistance, query]
+  const trimmedQuery = query.trim().toLowerCase();
+
+  // Local text match — restaurant/listing name OR note, so a food/cuisine/
+  // item term ("dosa", "biryani", "filter coffee") matches whenever it
+  // appears in a listing's own name or its note, same as a landmark
+  // mentioned in a note (e.g. "near Gandhi Bazaar") already matched by name
+  // alone before this.
+  const textMatches = useMemo(
+    () =>
+      listingsWithDistance.filter(
+        (l) => l.name.toLowerCase().includes(trimmedQuery) || (l.note ?? '').toLowerCase().includes(trimmedQuery)
+      ),
+    [listingsWithDistance, trimmedQuery]
   );
 
-  // Mobile-only list ordering — nearest-first when the viewer's own location
-  // is known, else newest-first. Desktop/tablet/landscape keep `filtered`'s
-  // own order (cheapest-first, from the Supabase query) unchanged. Doesn't
-  // touch pin order on the map (MapView is still fed `filtered` directly) —
-  // order is irrelevant there, only the scrollable list cares.
-  const mobileListListings = useMemo(() => {
-    if (!isMobilePortrait) return filtered;
-    const sorted = [...filtered];
+  // Memoized so this array's identity only changes when its real inputs do
+  // — MapView re-fits the camera to it whenever the reference changes, so a
+  // stable reference across unrelated re-renders (e.g. the results-dropdown
+  // open/close state) stops that refit from firing and stomping on an
+  // in-progress flyToCenter animation. Declared before the search effect
+  // below, which reads filtered.length to decide whether an external search
+  // is even needed.
+  //
+  // No query -> every listing (unchanged browse default, cheapest-first
+  // from the Supabase query). Otherwise -> the union of textMatches and
+  // areaListings (deduped by id, text matches first) — a UNION, not an
+  // either/or: a listing that matches by name/note AND one that's merely
+  // nearby the query's resolved area but textually unrelated should both
+  // show (see the search effect below for why they're not treated as
+  // alternatives).
+  const filtered = useMemo(() => {
+    if (!trimmedQuery) return listingsWithDistance;
+    if (areaListings.length === 0) return textMatches;
+    const seen = new Set(textMatches.map((l) => l.id));
+    return [...textMatches, ...areaListings.filter((l) => !seen.has(l.id))];
+  }, [trimmedQuery, listingsWithDistance, textMatches, areaListings]);
+
+  // Nearest-first when the viewer's own location is known, else
+  // newest-first — the same rule applied two different ways below:
+  // unconditionally for mobile's list (pre-existing behavior, unchanged),
+  // and only while actively searching for desktop/tablet/landscape (new —
+  // browsing with an empty query keeps their cheapest-first order).
+  function byLocationPriority(list: ListingWithDistance[]): ListingWithDistance[] {
+    const sorted = [...list];
     if (userLocation) {
       sorted.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
     } else {
       sorted.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
     }
     return sorted;
+  }
+
+  // Mobile-only list ordering — nearest-first when the viewer's own location
+  // is known, else newest-first, regardless of whether a search is active.
+  // Desktop/tablet/landscape keep `filtered`'s own order (cheapest-first)
+  // while browsing — see desktopListListings below for their search-active
+  // case. Doesn't touch pin order on the map (MapView is still fed
+  // `filtered` directly) — order is irrelevant there, only the scrollable
+  // list cares.
+  const mobileListListings = useMemo(() => {
+    if (!isMobilePortrait) return filtered;
+    return byLocationPriority(filtered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered, isMobilePortrait, userLocation]);
+
+  // Desktop/tablet/landscape's own list ordering: cheapest-first (filtered's
+  // own order, untouched) while just browsing, but reordered by the same
+  // nearest/newest rule as mobile the moment a search is actually active —
+  // "Search results should prioritize/reorder matching listings by nearest
+  // distance" wasn't previously true for these breakpoints at all.
+  const desktopListListings = useMemo(() => {
+    if (!trimmedQuery) return filtered;
+    return byLocationPriority(filtered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, trimmedQuery, userLocation]);
 
   // Landmark search on the browse map — separate from the substring filter
   // above (runs on every keystroke, no debounce, purely local): this
   // debounces a call out to OLA Places so searching a landmark (not
-  // necessarily a listed spot) can fly the map there. Skipped entirely when
-  // the query already matches an existing listing (filtered.length > 0) —
-  // the local list/map already show that match, so there's no need to also
-  // hit the external API, which keeps ordinary filter-typing from firing
-  // unnecessary network requests.
+  // necessarily a listed spot) can fly the map there, AND — new — tries the
+  // query as an area/locality name: the top prediction's coordinate becomes
+  // the center of a radius search against our own listings (areaListings,
+  // AREA_MATCH_RADIUS_KM). Only our own listings are ever shown as search
+  // results this way — OLA's predictions are used purely to resolve "where
+  // is this named area", never rendered as picks themselves, per "don't
+  // return arbitrary external places as restaurant listings".
+  //
+  // Deliberately NOT skipped when textMatches already has hits: a listing
+  // whose own name happens to contain the query text (a restaurant
+  // literally named "... Indiranagar ...", say) would otherwise silently
+  // hide every *other*, differently-named listing that's genuinely in that
+  // same area — `filtered` unions textMatches with areaListings below
+  // rather than treating them as alternatives, so both surface together.
+  // areaListings is cleared synchronously on every query change (not just
+  // on the debounced resolution) so a stale match from the *previous*
+  // query can't briefly linger merged into the new one's results.
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    setAreaListings([]);
     if (skipNextSearchRef.current) {
       skipNextSearchRef.current = false;
       return;
@@ -251,20 +333,39 @@ export default function App() {
       setSearchPin(null);
       return;
     }
-    if (filtered.length > 0) {
-      setPlaceResults([]);
-      setSearchResultsOpen(false);
-      return;
-    }
     searchDebounce.current = setTimeout(async () => {
       const results = await searchPlaces(query);
-      setPlaceResults(results);
-      setSearchResultsOpen(true);
+      const areaCenter = results[0];
+      const nearby = areaCenter
+        ? listingsWithDistance.filter(
+            (l) => distanceKm(areaCenter.latitude, areaCenter.longitude, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM
+          )
+        : [];
+      setAreaListings(nearby);
+      if (nearby.length > 0 || textMatches.length > 0) {
+        // Already have real results (text and/or area) — the raw place
+        // list (meant for the separate "add a new listing at this
+        // landmark" flow) stays hidden rather than showing alongside them.
+        setPlaceResults([]);
+        setSearchResultsOpen(false);
+      } else {
+        // Neither a listing/food match nor a resolvable area with listings
+        // nearby — fall back to the pre-existing landmark-suggestion
+        // dropdown (still lets a genuinely novel location be added as a new
+        // listing) so a query like this doesn't just silently go nowhere.
+        setPlaceResults(results);
+        setSearchResultsOpen(true);
+      }
     }, 400);
     return () => {
       if (searchDebounce.current) clearTimeout(searchDebounce.current);
     };
-  }, [query, filtered.length]);
+    // textMatches.length deliberately omitted — re-running this effect on
+    // every text-match change would refire the network call before the
+    // query itself changed; the debounced callback above reads the latest
+    // textMatches via closure when it actually runs instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, listingsWithDistance]);
 
   // Close the results dropdown on an outside click — it should only go away
   // by picking a result or clearing the search, not stay open forever.
@@ -336,37 +437,6 @@ export default function App() {
     setFrameHeight(el.clientHeight);
     return () => resizeObserver.disconnect();
   }, []);
-
-  // Pixels reserved on the right of the map that the popup must not render
-  // underneath — the list panel's own real rendered width (measured, not
-  // computed from its clamp()/fixed-width CSS, so it can never drift out of
-  // sync with what actually renders), zero on mobile portrait where the list
-  // is a bottom sheet rather than a right-side panel. Mirrors bottomInset's
-  // existing approach (also measured, also zeroed out on the one breakpoint
-  // where the thing it protects against isn't present) rather than
-  // introducing a second, differently-shaped mechanism for the same job.
-  useEffect(() => {
-    if (isMobilePortrait) {
-      setRightInset(0);
-      return;
-    }
-    const frame = mapFrameRef.current;
-    const panel = listPanelOuterRef.current;
-    if (!frame || !panel) return;
-    function measure() {
-      if (!frame || !panel) return;
-      setRightInset(Math.max(0, frame.getBoundingClientRect().right - panel.getBoundingClientRect().left));
-    }
-    measure();
-    const resizeObserver = new ResizeObserver(measure);
-    resizeObserver.observe(frame);
-    resizeObserver.observe(panel);
-    window.addEventListener('resize', measure);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [isMobilePortrait]);
 
   // Measures `.sheet-peek-zone` — the drag handle plus, on mobile, the hint
   // pill — so MAP mode's sheet height is always exactly "whatever's peeking
@@ -492,6 +562,22 @@ export default function App() {
     });
   }
 
+  // The one place that fully backs out of an active search without
+  // selecting anything — the search box's own ✕ button, Escape, and (via
+  // resetToHome below) the browser/edge-swipe back gesture all funnel
+  // through either this or resetToHome. Deliberately narrower than
+  // resetToHome: it only touches search state, so clearing a search while a
+  // listing's popup happens to also be open (query and selectedListingId
+  // are independent) doesn't also close that popup.
+  function clearSearch() {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    setQuery('');
+    setPlaceResults([]);
+    setAreaListings([]);
+    setSearchResultsOpen(false);
+    if (!pickingLocation) setSearchPin(null);
+  }
+
   // Selecting a listing (map marker or list card) shares the exact same
   // camera mechanism as a landmark search — same pan+zoom, same reliability
   // — instead of relying solely on the info-window effect's own panTo.
@@ -531,15 +617,29 @@ export default function App() {
     setLegalTab(null);
     setShowAbout(false);
     setSelectedListingId(null);
+    // An active search is one more "internal view" back/edge-swipe should
+    // close rather than exiting the site (see hasOpenState below) — so
+    // fully returning home clears it the same way it closes every other
+    // view, same reasoning as clearSearch above just folded into the one
+    // shared reset.
+    setQuery('');
+    setPlaceResults([]);
+    setAreaListings([]);
+    setSearchResultsOpen(false);
   }, []);
 
   // Whether the app is currently showing anything other than the plain
   // browsing map — every one of these is a distinct "internal view" a
   // browser back-press or edge-swipe should close rather than exiting the
-  // site. Deliberately excludes lighter-weight, transient UI (the search
-  // results dropdown, a report popover) — those aren't "views" a user would
-  // expect a back-press to navigate out of.
-  const hasOpenState = showAdd || legalTab !== null || showAbout || selectedListingId !== null;
+  // site. An active search (non-empty query) is included so that a search
+  // with no clean way to back out of it (e.g. "Indiranagar" resolving to no
+  // on-map suggestion the user wants to pick) can still be dismissed with
+  // the normal back gesture/button, not just by manually clearing the box.
+  // The results dropdown's own open/closed state and a report popover stay
+  // excluded — those are lighter-weight transient UI a back-press wouldn't
+  // be expected to specifically target, and they close on their own (an
+  // outside click, selecting a result) well before the query itself does.
+  const hasOpenState = showAdd || legalTab !== null || showAbout || selectedListingId !== null || trimmedQuery.length > 0;
 
   // Keeps one browser-history entry in sync with hasOpenState so back/
   // side-swipe closes an internal view instead of leaving the site — this
@@ -649,6 +749,77 @@ export default function App() {
     setSearchPin(null);
   }
 
+  function showHomeExitNotice(message: string) {
+    if (homeExitNoticeTimeoutRef.current) clearTimeout(homeExitNoticeTimeoutRef.current);
+    setHomeExitNotice(message);
+    homeExitNoticeTimeoutRef.current = setTimeout(() => setHomeExitNotice(null), 3200);
+  }
+
+  // Two deliberate downward swipes on the bare map surface (MAP mode's
+  // "home" — the sheet is collapsed to its peek zone, nothing else open)
+  // exit the mobile-web experience. A single web page has no way to
+  // actually close its own tab/the browser/app — window.close() only works
+  // on a tab the page itself opened via script — so the closest real
+  // equivalent is handing the gesture to the browser's own back history.
+  //
+  // window.history.length can't reliably tell us whether there's actually
+  // a *real* previous page to land on: this app's own modal-open/close
+  // pushState/back() pairs (see hasOpenState's effect above) leave it
+  // permanently inflated by one after the very first modal interaction in
+  // the tab, even with nothing genuinely behind this page — so branching
+  // the message on it would sometimes claim "leaving" when back() is
+  // actually a same-document no-op. Rather than guess, always attempt
+  // back() (harmless either way) and always show the same message that's
+  // accurate regardless of what it actually did — this IS the platform
+  // limitation being reported, not a claim about the outcome.
+  function attemptHomeExit() {
+    window.history.back();
+    showHomeExitNotice("Taking you back as far as a web page can — closing a browser tab or app isn't something a page is allowed to do. Use your device's back button or close the tab to fully exit.");
+  }
+
+  // Only the bare map surface counts — not the list/sheet (its own drag
+  // gesture already owns downward swipes there), not the search bar/Add
+  // button/zoom/locate controls, and not the search-results dropdown.
+  // Keeps this from ever firing off the back of an ordinary list
+  // pull-up/pull-down or a drag on the sheet handle.
+  function isHomeExitEligibleTarget(target: EventTarget | null) {
+    if (!(target instanceof Element)) return true;
+    return !target.closest('.list-panel-outer, .map-overlay-row, .zoom-control, .locate-control, .map-search-results, .picking-dialog');
+  }
+
+  function handleHomeTouchStart(e: ReactTouchEvent<HTMLDivElement>) {
+    if (!isMobilePortrait || sheetState !== 'map' || hasOpenState || e.touches.length !== 1 || !isHomeExitEligibleTarget(e.target)) {
+      homeSwipeStartRef.current = null;
+      return;
+    }
+    homeSwipeStartRef.current = { y: e.touches[0].clientY, t: performance.now() };
+  }
+
+  function handleHomeTouchEnd(e: ReactTouchEvent<HTMLDivElement>) {
+    const start = homeSwipeStartRef.current;
+    homeSwipeStartRef.current = null;
+    const end = e.changedTouches[0];
+    if (!start || !end) return;
+
+    const deltaY = end.clientY - start.y;
+    const deltaT = performance.now() - start.t;
+    if (deltaY < HOME_SWIPE_MIN_DISTANCE_PX || deltaT > HOME_SWIPE_MAX_DURATION_MS) {
+      // Not a fast, deliberate downward swipe — doesn't count as the first
+      // half of a double-swipe, and cancels a pending one so two unrelated
+      // slow drags can't accidentally add up to an exit.
+      firstHomeSwipeAtRef.current = null;
+      return;
+    }
+
+    const now = performance.now();
+    if (firstHomeSwipeAtRef.current != null && now - firstHomeSwipeAtRef.current <= HOME_DOUBLE_SWIPE_WINDOW_MS) {
+      firstHomeSwipeAtRef.current = null;
+      attemptHomeExit();
+    } else {
+      firstHomeSwipeAtRef.current = now;
+    }
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -657,7 +828,7 @@ export default function App() {
             <Logo size={26} />
             <span>Beggars Map</span>
           </div>
-          <div className="brand-sub">Cheap eats in Bengaluru, ₹100 or under</div>
+          <div className="brand-sub">Affordable eats in Bengaluru, ₹100 or under</div>
         </div>
         <button className="about-button" onClick={() => setShowAbout(true)}>About Us</button>
       </header>
@@ -672,6 +843,9 @@ export default function App() {
             className={`map-frame${isMobilePortrait && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}
             ref={mapFrameRef}
             style={frameHeight > 0 ? ({ '--sheet-h': `${appliedSheetHeight}px` } as CSSProperties) : undefined}
+            onTouchStart={isMobilePortrait ? handleHomeTouchStart : undefined}
+            onTouchEnd={isMobilePortrait ? handleHomeTouchEnd : undefined}
+            onTouchCancel={isMobilePortrait ? handleHomeTouchEnd : undefined}
           >
             <MapView
               listings={filtered}
@@ -687,8 +861,6 @@ export default function App() {
               selectedDistanceKm={
                 isMobilePortrait ? listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null : null
               }
-              bottomInset={isMobilePortrait ? appliedSheetHeight : 0}
-              rightInset={rightInset}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -709,15 +881,29 @@ export default function App() {
                   onFocus={() => setSearchResultsOpen(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') runSearchNow();
+                    // Escape always fully backs out of the search (not just
+                    // closing the suggestion dropdown) — the one keyboard
+                    // way to "dismiss/exit search without selecting
+                    // anything" a random/no-result query.
+                    else if (e.key === 'Escape') clearSearch();
                   }}
-                  placeholder="Search by landmark or restaurant name"
+                  placeholder="Search dish, area, landmark, or restaurant"
                 />
-                <button className="search-icon-button" onClick={runSearchNow} aria-label="Search">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                    <circle cx="11" cy="11" r="7" />
-                    <line x1="21" y1="21" x2="16.2" y2="16.2" />
-                  </svg>
-                </button>
+                {query ? (
+                  <button className="search-clear-button" onClick={clearSearch} aria-label="Clear search">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                      <line x1="5" y1="5" x2="19" y2="19" />
+                      <line x1="19" y1="5" x2="5" y2="19" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button className="search-icon-button" onClick={runSearchNow} aria-label="Search">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="21" y1="21" x2="16.2" y2="16.2" />
+                    </svg>
+                  </button>
+                )}
               </div>
               {pickingLocation ? (
                 <button className="secondary-button map-picking-cancel picking-fade-in" onClick={cancelPickingLocation}>Cancel</button>
@@ -763,8 +949,9 @@ export default function App() {
               <div className="map-click-hint">Click the map, or search a landmark, to place your pin</div>
             ) : null}
 
+            {homeExitNotice ? <div className="home-exit-toast">{homeExitNotice}</div> : null}
+
             <div
-              ref={listPanelOuterRef}
               className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}`}
               style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
             >
@@ -793,7 +980,7 @@ export default function App() {
                 {loading && listings.length === 0 ? (
                   <div className="state-block">
                     <span className="spinner" aria-hidden="true" />
-                    <p className="loading-text">Loading cheap eats…</p>
+                    <p className="loading-text">Loading affordable eats…</p>
                   </div>
                 ) : null}
                 {!loading && loadError ? (
@@ -816,7 +1003,7 @@ export default function App() {
                   ) : null
                 ) : null}
 
-                {(isMobilePortrait ? mobileListListings : filtered).map((listing) => (
+                {(isMobilePortrait ? mobileListListings : desktopListListings).map((listing) => (
                   <div
                     key={listing.id}
                     data-listing-id={listing.id}

@@ -38,20 +38,6 @@ type Props = {
   // preserving the existing "desktop never shows distance" rule); threaded
   // straight into the popup's own compact card.
   selectedDistanceKm?: number | null;
-  // Pixels reserved at the bottom of the map container that the popup must
-  // not render underneath — mobile's bottom sheet, in practice (0 elsewhere).
-  // Read live via a ref inside the popup-position RAF loop below, not baked
-  // into that effect's own deps, since it changes continuously while a user
-  // drags the sheet.
-  bottomInset?: number;
-  // Pixels reserved on the right of the map container that the popup must
-  // not render underneath — the restaurant list's own floating side panel on
-  // desktop/tablet/landscape (0 on mobile portrait, where the list is a
-  // bottom sheet instead, not a right-side panel). Same read-via-ref
-  // treatment as bottomInset, for the same reason (App.tsx measures this
-  // live via ResizeObserver, so it can change on window resize without this
-  // component needing to remount anything).
-  rightInset?: number;
 };
 
 export default function MapView({
@@ -66,8 +52,6 @@ export default function MapView({
   onListingUpdated,
   hidePopup,
   selectedDistanceKm,
-  bottomInset,
-  rightInset,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -113,19 +97,21 @@ export default function MapView({
     onMapClickRef.current = onMapClick;
   }, [onMapClick]);
 
-  // Same pattern as onMapClickRef above — read inside the popup-position RAF
-  // loop rather than added to that effect's own deps, since it changes
-  // continuously while a user drags the mobile bottom sheet with a popup
-  // open, and that loop must see the live value without remounting.
-  const bottomInsetRef = useRef(bottomInset ?? 0);
+  // Same ref treatment, same reason — App.tsx doesn't wrap selectListing in
+  // useCallback, so this prop gets a new function identity on every one of
+  // App's renders (typing in search, a sheet-drag pointermove, a
+  // ResizeObserver tick, etc). Reading it directly in the markers effect's
+  // dependency array used to force a full destroy-and-rebuild of every
+  // marker on each of those unrelated renders; while the selected marker's
+  // element briefly didn't exist (the rebuild is async), the popup-position
+  // RAF loop below found no pin to measure and silently kept rendering the
+  // popup at its last-known position — which is what made the popup visibly
+  // drift away from its pin on any map movement/resize/interaction, not
+  // just on an actual selection change.
+  const onSelectListingRef = useRef(onSelectListing);
   useEffect(() => {
-    bottomInsetRef.current = bottomInset ?? 0;
-  }, [bottomInset]);
-
-  const rightInsetRef = useRef(rightInset ?? 0);
-  useEffect(() => {
-    rightInsetRef.current = rightInset ?? 0;
-  }, [rightInset]);
+    onSelectListingRef.current = onSelectListing;
+  }, [onSelectListing]);
 
   useEffect(() => {
     if (!containerRef.current || !hasKey) return;
@@ -258,7 +244,7 @@ export default function MapView({
         el.textContent = `₹${listing.price_rupees}`;
         el.addEventListener('click', (e) => {
           e.stopPropagation();
-          onSelectListing(listing.id);
+          onSelectListingRef.current(listing.id);
         });
         if (isSelected) selectedMarkerElRef.current = el;
 
@@ -299,7 +285,10 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [listings, onSelectListing, mapLoading, selectedListingId]);
+    // onSelectListing is intentionally excluded — see onSelectListingRef
+    // above for why including it here caused the popup-drift bug.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, mapLoading, selectedListingId]);
 
   // Pan/zoom to a searched landmark. Keyed on the token (not the center
   // value itself) so re-selecting the same coordinates still moves the
@@ -381,6 +370,17 @@ export default function MapView({
   // glued to it. Skipped only while picking a location for a new listing
   // (hidePopup) — selection is repurposed there, so a popup would be
   // meaningless mid-pick.
+  //
+  // Deliberately NOT clamped to stay clear of the list panel/sheet or the
+  // container edges (an earlier pass did this by overriding x/y with
+  // Math.min/Math.max against boundary values) — that clamp silently
+  // substituted a *different* screen position than the pin's own, which
+  // reads as the popup having detached from its listing's actual location
+  // whenever a selected pin sat near an edge. The requirement is that the
+  // popup's anchor always equals the pin's real coordinate, with no
+  // exception for boundaries; a pin near the list panel or a map edge may
+  // now render its popup partially underneath the panel or clipped at the
+  // container's edge rather than being silently repositioned.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || mapLoading) return;
@@ -401,30 +401,9 @@ export default function MapView({
       if (pinEl && containerEl) {
         const pinRect = pinEl.getBoundingClientRect();
         const containerRect = containerEl.getBoundingClientRect();
-        // Google's InfoWindow used to auto-pan the map so a popup near the
-        // viewport edge always stayed fully visible — a plain positioned div
-        // has no equivalent, so this clamps every edge by hand instead:
-        // a top floor (a pin close to the top of a short frame, routine in
-        // mobile-landscape, could otherwise open the card underneath the
-        // search bar), a bottom ceiling (mobile's bottom sheet, via
-        // bottomInsetRef — without this, a pin near the bottom of the
-        // visible map could open its popup partially behind the sheet), and
-        // left/right floors/ceilings (the map's own edges, and — via
-        // rightInsetRef — the restaurant list's floating side panel on
-        // desktop/tablet/landscape, which the popup must never render
-        // underneath; 0 on mobile portrait, where the list is a bottom sheet
-        // instead, not a right-side obstruction). The tail just won't
-        // perfectly meet the pin in a clamped case, which is a minor, rare
-        // tradeoff against actually being obscured or clipped off-screen.
-        const topClamp = 190;
-        const maxY = Math.max(containerRect.height - bottomInsetRef.current - 12, topClamp);
-        const halfPopupWidth = 135; // matches .map-popup-card's fixed 270px width
-        const sideGap = 8;
-        const minX = halfPopupWidth + sideGap;
-        const maxX = Math.max(minX, containerRect.width - rightInsetRef.current - halfPopupWidth - sideGap);
         setPopupPosition({
-          x: Math.min(Math.max(pinRect.left + pinRect.width / 2 - containerRect.left, minX), maxX),
-          y: Math.min(Math.max(pinRect.top - containerRect.top, topClamp), maxY),
+          x: pinRect.left + pinRect.width / 2 - containerRect.left,
+          y: pinRect.top - containerRect.top,
         });
       }
       popupRafRef.current = requestAnimationFrame(measure);

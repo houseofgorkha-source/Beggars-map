@@ -61,7 +61,7 @@ export default function LegalModal({ initialTab, onClose }: Props) {
           ) : (
             <>
               <h3>What Beggars Map is</h3>
-              <p>A free, community-run directory of cheap eats (₹100 or under per plate/meal) in Bengaluru. Listings, prices, and reviews are submitted by users, not verified by us before they go live.</p>
+              <p>A free, community-run directory of affordable eats (₹100 or under per plate/meal) in Bengaluru. Listings, prices, and reviews are submitted by users, not verified by us before they go live.</p>
 
               <h3>No warranty on listings</h3>
               <p>A listed spot could be closed, its price could have changed, or its hygiene/quality is only as good as what other users have self-reported. Always use your own judgement — Beggars Map is a directory, not a guarantee.</p>
