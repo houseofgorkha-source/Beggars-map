@@ -115,6 +115,15 @@ export default function App() {
   // fresh — using stale state there produced visible jitter.
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const [frameHeight, setFrameHeight] = useState(0);
+  // The list panel's own outer container — measured (not CSS-math-guessed,
+  // same philosophy as frameHeight/sidePanelTop above) so MapView's popup can
+  // clamp itself to never render underneath it. Only meaningful on
+  // desktop/tablet/landscape, where the list floats as a side panel over the
+  // map; on mobile portrait it becomes a full-width bottom sheet instead, so
+  // there's no horizontal boundary to keep the popup clear of there — see
+  // rightInset below.
+  const listPanelOuterRef = useRef<HTMLDivElement>(null);
+  const [rightInset, setRightInset] = useState(0);
   const [sheetState, setSheetState] = useState<SheetState>('map');
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const dragHeightRef = useRef<number | null>(null);
@@ -327,6 +336,37 @@ export default function App() {
     setFrameHeight(el.clientHeight);
     return () => resizeObserver.disconnect();
   }, []);
+
+  // Pixels reserved on the right of the map that the popup must not render
+  // underneath — the list panel's own real rendered width (measured, not
+  // computed from its clamp()/fixed-width CSS, so it can never drift out of
+  // sync with what actually renders), zero on mobile portrait where the list
+  // is a bottom sheet rather than a right-side panel. Mirrors bottomInset's
+  // existing approach (also measured, also zeroed out on the one breakpoint
+  // where the thing it protects against isn't present) rather than
+  // introducing a second, differently-shaped mechanism for the same job.
+  useEffect(() => {
+    if (isMobilePortrait) {
+      setRightInset(0);
+      return;
+    }
+    const frame = mapFrameRef.current;
+    const panel = listPanelOuterRef.current;
+    if (!frame || !panel) return;
+    function measure() {
+      if (!frame || !panel) return;
+      setRightInset(Math.max(0, frame.getBoundingClientRect().right - panel.getBoundingClientRect().left));
+    }
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(frame);
+    resizeObserver.observe(panel);
+    window.addEventListener('resize', measure);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [isMobilePortrait]);
 
   // Measures `.sheet-peek-zone` — the drag handle plus, on mobile, the hint
   // pill — so MAP mode's sheet height is always exactly "whatever's peeking
@@ -648,6 +688,7 @@ export default function App() {
                 isMobilePortrait ? listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null : null
               }
               bottomInset={isMobilePortrait ? appliedSheetHeight : 0}
+              rightInset={rightInset}
             />
 
             <div className="map-overlay-row" ref={overlayRowRef}>
@@ -723,6 +764,7 @@ export default function App() {
             ) : null}
 
             <div
+              ref={listPanelOuterRef}
               className={`list-panel-outer${isDraggingSheet ? ' sheet-dragging' : ''}`}
               style={sidePanelTop != null ? { top: sidePanelTop } : undefined}
             >

@@ -44,6 +44,14 @@ type Props = {
   // into that effect's own deps, since it changes continuously while a user
   // drags the sheet.
   bottomInset?: number;
+  // Pixels reserved on the right of the map container that the popup must
+  // not render underneath — the restaurant list's own floating side panel on
+  // desktop/tablet/landscape (0 on mobile portrait, where the list is a
+  // bottom sheet instead, not a right-side panel). Same read-via-ref
+  // treatment as bottomInset, for the same reason (App.tsx measures this
+  // live via ResizeObserver, so it can change on window resize without this
+  // component needing to remount anything).
+  rightInset?: number;
 };
 
 export default function MapView({
@@ -59,6 +67,7 @@ export default function MapView({
   hidePopup,
   selectedDistanceKm,
   bottomInset,
+  rightInset,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -112,6 +121,11 @@ export default function MapView({
   useEffect(() => {
     bottomInsetRef.current = bottomInset ?? 0;
   }, [bottomInset]);
+
+  const rightInsetRef = useRef(rightInset ?? 0);
+  useEffect(() => {
+    rightInsetRef.current = rightInset ?? 0;
+  }, [rightInset]);
 
   useEffect(() => {
     if (!containerRef.current || !hasKey) return;
@@ -389,18 +403,27 @@ export default function MapView({
         const containerRect = containerEl.getBoundingClientRect();
         // Google's InfoWindow used to auto-pan the map so a popup near the
         // viewport edge always stayed fully visible — a plain positioned div
-        // has no equivalent, so this clamps both edges by hand instead:
+        // has no equivalent, so this clamps every edge by hand instead:
         // a top floor (a pin close to the top of a short frame, routine in
         // mobile-landscape, could otherwise open the card underneath the
-        // search bar) and a bottom ceiling (mobile's bottom sheet, via
+        // search bar), a bottom ceiling (mobile's bottom sheet, via
         // bottomInsetRef — without this, a pin near the bottom of the
-        // visible map could open its popup partially behind the sheet). The
-        // tail just won't perfectly meet the pin in either clamped case,
-        // which is a minor, rare tradeoff against actually being obscured.
+        // visible map could open its popup partially behind the sheet), and
+        // left/right floors/ceilings (the map's own edges, and — via
+        // rightInsetRef — the restaurant list's floating side panel on
+        // desktop/tablet/landscape, which the popup must never render
+        // underneath; 0 on mobile portrait, where the list is a bottom sheet
+        // instead, not a right-side obstruction). The tail just won't
+        // perfectly meet the pin in a clamped case, which is a minor, rare
+        // tradeoff against actually being obscured or clipped off-screen.
         const topClamp = 190;
         const maxY = Math.max(containerRect.height - bottomInsetRef.current - 12, topClamp);
+        const halfPopupWidth = 135; // matches .map-popup-card's fixed 270px width
+        const sideGap = 8;
+        const minX = halfPopupWidth + sideGap;
+        const maxX = Math.max(minX, containerRect.width - rightInsetRef.current - halfPopupWidth - sideGap);
         setPopupPosition({
-          x: pinRect.left + pinRect.width / 2 - containerRect.left,
+          x: Math.min(Math.max(pinRect.left + pinRect.width / 2 - containerRect.left, minX), maxX),
           y: Math.min(Math.max(pinRect.top - containerRect.top, topClamp), maxY),
         });
       }
