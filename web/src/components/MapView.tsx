@@ -11,6 +11,13 @@ type Props = {
   showLocate?: boolean;
   onMapClick?: (latitude: number, longitude: number) => void;
   flyToCenter?: { center: [number, number]; token: number };
+  // Moves the camera to show an *executed* search's result set — entirely
+  // separate from flyToCenter (used by listing selection/location-picking)
+  // so search can never touch the popup/pin-selection machinery. One point
+  // pans+zooms there; several fit the camera to bounds containing all of
+  // them. Does not affect which markers render — `listings` above already
+  // controls that; this only ever moves the camera.
+  searchFocus?: { points: { lat: number; lng: number }[]; token: number };
   // A landmark search result that isn't one of our own listings (so it has
   // no price-pill marker of its own) — rendered as a distinct pin so the
   // searched point is visibly pinpointed, not just implied by camera
@@ -46,6 +53,7 @@ export default function MapView({
   showLocate,
   onMapClick,
   flyToCenter,
+  searchFocus,
   searchPin,
   selectedListingId,
   onClosePopup,
@@ -300,6 +308,32 @@ export default function MapView({
     map.setZoom(16);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToCenter?.token, mapLoading]);
+
+  // Moves the camera to show an executed search's result set. Keyed on the
+  // token, same reasoning as flyToCenter above. A single point (one text
+  // match, or an area with nothing nearby yet) pans+zooms there directly;
+  // several fit the camera to bounds containing all of them, reusing the
+  // same over-zoom guard the initial all-listings fitBounds already uses
+  // below, so a tight cluster of 2-3 nearby results doesn't zoom in
+  // absurdly far. Entirely separate from the popup/pin-selection effects
+  // above — this never touches selectedMarkerElRef or popupPosition.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !searchFocus || mapLoading || searchFocus.points.length === 0) return;
+    if (searchFocus.points.length === 1) {
+      map.panTo(searchFocus.points[0]);
+      map.setZoom(15);
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    searchFocus.points.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, 60);
+    google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+      const zoom = map.getZoom();
+      if (zoom !== undefined && zoom > 15) map.setZoom(15);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchFocus?.token, mapLoading]);
 
   // A search-result pin for a landmark that isn't one of our own listings.
   // Kept separate from the listing markers effect above (which only runs in

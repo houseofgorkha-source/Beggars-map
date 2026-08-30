@@ -118,11 +118,26 @@ export default function App() {
 
   const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
-  // Populated by the search effect below when the typed query matches no
-  // listing by name/note but does resolve to a nearby area (see
-  // AREA_MATCH_RADIUS_KM) — these are our own listings, not external
-  // places, so they flow into `filtered` the same way a name match does.
+  // Populated by the search effect below only when the typed query matches
+  // no listing by name/note/location_label — OLA resolves it as an
+  // area/landmark instead (see AREA_MATCH_RADIUS_KM), and these are our own
+  // nearby listings, not external places, so they flow into `filtered` the
+  // same way a text match does. Local text matches always win outright when
+  // any exist — this is a fallback, not a union (see textMatches/filtered).
   const [areaListings, setAreaListings] = useState<ListingWithDistance[]>([]);
+  // The geocoded center behind `areaListings` (or null once there isn't
+  // one) — kept separate from areaListings itself because it's needed for
+  // two more things: ranking area matches nearest-to-that-point-first, and
+  // flying the camera there even when zero listings ended up nearby (so an
+  // area search still visibly moves the map to the searched place).
+  const [areaCenter, setAreaCenter] = useState<{ lat: number; lon: number } | null>(null);
+  // Drives MapView's camera fit for an executed search (Enter, the search
+  // icon, or picking a dropdown suggestion) — deliberately a separate
+  // mechanism from flyToCenter (used by listing selection/location-picking)
+  // so this can't interfere with the popup/pin-anchoring architecture at
+  // all. One or many points: one point pans+zooms there, several fit the
+  // camera to bounds containing all of them.
+  const [searchFocus, setSearchFocus] = useState<{ points: { lat: number; lng: number }[]; token: number } | null>(null);
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
@@ -240,46 +255,86 @@ export default function App() {
 
   const trimmedQuery = query.trim().toLowerCase();
 
-  // Local text match — restaurant/listing name OR note, so a food/cuisine/
-  // item term ("dosa", "biryani", "filter coffee") matches whenever it
-  // appears in a listing's own name or its note, same as a landmark
-  // mentioned in a note (e.g. "near Gandhi Bazaar") already matched by name
-  // alone before this.
-  const textMatches = useMemo(
-    () =>
-      listingsWithDistance.filter(
-        (l) => l.name.toLowerCase().includes(trimmedQuery) || (l.note ?? '').toLowerCase().includes(trimmedQuery)
-      ),
-    [listingsWithDistance, trimmedQuery]
-  );
+  // Forgiving partial/substring relevance score against a listing's own
+  // searchable text — not a rigid classifier. `includes()` already handles
+  // partial input for free ("nort" is a substring of "north", "dos" of
+  // "dosa"), so no separate fuzzy-matching library is needed for that part;
+  // this only adds a *ranking* on top; whether something matches at all is
+  // still plain substring containment. 0 = no match. Checked in this order
+  // so a name hit always outranks a hit that only shows up in the note or
+  // the resolved address — a listing named "Dosa Corner" should rank above
+  // one that merely mentions dosa in passing.
+  function textRelevance(l: ListingWithDistance, q: string): number {
+    const name = l.name.toLowerCase();
+    if (name.startsWith(q)) return 4;
+    if (name.includes(q)) return 3;
+    if ((l.location_label ?? '').toLowerCase().includes(q)) return 2;
+    if ((l.note ?? '').toLowerCase().includes(q)) return 1;
+    return 0;
+  }
+
+  // Local text match — name, note, AND location_label (e.g. "indiranagar"
+  // matches a listing whose resolved address mentions it, even if its own
+  // name/note never does). This is the search's first and primary pass —
+  // area/geographic resolution (the debounced effect below) is a fallback
+  // that only runs at all when this comes up empty, not a parallel source
+  // merged in afterward. That's a deliberate change from this feature's
+  // earlier "union" design: a query should mean one thing, not silently
+  // blend two different kinds of match together — see the debounced effect
+  // below for the one documented trade-off this reintroduces.
+  const textMatches = useMemo(() => {
+    if (!trimmedQuery) return [];
+    return listingsWithDistance.filter((l) => textRelevance(l, trimmedQuery) > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listingsWithDistance, trimmedQuery]);
+
+  // Ranks text matches by relevance tier first (name > location_label >
+  // note), then by proximity within a tier — nearest-to-viewer when their
+  // location is known, else newest-first. Same fallback rule
+  // AGENTS.md already documents for mobile's own list, just also applied
+  // to relevance ties here.
+  function sortTextMatches(list: ListingWithDistance[], q: string): ListingWithDistance[] {
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      const byRelevance = textRelevance(b, q) - textRelevance(a, q);
+      if (byRelevance !== 0) return byRelevance;
+      if (userLocation) return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity);
+      return Date.parse(b.created_at) - Date.parse(a.created_at);
+    });
+    return sorted;
+  }
+
+  // Ranks area-fallback matches nearest-to-the-searched-area-first — "closer
+  // to the middle of Whitefield" is the relevant ordering for an area
+  // search, distinct from "closer to the viewer" (that still applies to
+  // plain browsing and to text matches above).
+  function sortAreaMatches(list: ListingWithDistance[], center: { lat: number; lon: number } | null): ListingWithDistance[] {
+    if (!center) return list;
+    return [...list].sort((a, b) => distanceKm(center.lat, center.lon, a.latitude, a.longitude) - distanceKm(center.lat, center.lon, b.latitude, b.longitude));
+  }
 
   // Memoized so this array's identity only changes when its real inputs do
   // — MapView re-fits the camera to it whenever the reference changes, so a
   // stable reference across unrelated re-renders (e.g. the results-dropdown
   // open/close state) stops that refit from firing and stomping on an
-  // in-progress flyToCenter animation. Declared before the search effect
-  // below, which reads filtered.length to decide whether an external search
-  // is even needed.
+  // in-progress flyToCenter animation.
   //
   // No query -> every listing (unchanged browse default, cheapest-first
-  // from the Supabase query). Otherwise -> the union of textMatches and
-  // areaListings (deduped by id, text matches first) — a UNION, not an
-  // either/or: a listing that matches by name/note AND one that's merely
-  // nearby the query's resolved area but textually unrelated should both
-  // show (see the search effect below for why they're not treated as
-  // alternatives).
+  // from the Supabase query). A query -> text matches win outright the
+  // moment any exist (ranked by sortTextMatches); only when there are truly
+  // none does the resolved geographic area's nearby listings (ranked by
+  // sortAreaMatches) become the result; neither existing -> empty (the
+  // list panel's own empty/add-place state handles that).
   const filtered = useMemo(() => {
     if (!trimmedQuery) return listingsWithDistance;
-    if (areaListings.length === 0) return textMatches;
-    const seen = new Set(textMatches.map((l) => l.id));
-    return [...textMatches, ...areaListings.filter((l) => !seen.has(l.id))];
-  }, [trimmedQuery, listingsWithDistance, textMatches, areaListings]);
+    if (textMatches.length > 0) return sortTextMatches(textMatches, trimmedQuery);
+    if (areaListings.length > 0) return sortAreaMatches(areaListings, areaCenter);
+    return [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmedQuery, listingsWithDistance, textMatches, areaListings, areaCenter, userLocation]);
 
   // Nearest-first when the viewer's own location is known, else
-  // newest-first — the same rule applied two different ways below:
-  // unconditionally for mobile's list (pre-existing behavior, unchanged),
-  // and only while actively searching for desktop/tablet/landscape (new —
-  // browsing with an empty query keeps their cheapest-first order).
+  // newest-first — mobile's own always-on browse-time ordering (unchanged).
   function byLocationPriority(list: ListingWithDistance[]): ListingWithDistance[] {
     const sorted = [...list];
     if (userLocation) {
@@ -290,100 +345,100 @@ export default function App() {
     return sorted;
   }
 
-  // Mobile-only list ordering — nearest-first when the viewer's own location
-  // is known, else newest-first, regardless of whether a search is active.
-  // Desktop/tablet/landscape keep `filtered`'s own order (cheapest-first)
-  // while browsing — see desktopListListings below for their search-active
-  // case. Doesn't touch pin order on the map (MapView is still fed
-  // `filtered` directly) — order is irrelevant there, only the scrollable
-  // list cares.
+  // Mobile-only list ordering: while just browsing (no query), nearest/
+  // newest-first as before. The moment a search is active, `filtered` is
+  // already in its final, correct order (relevance+proximity, or
+  // proximity-to-area) — re-sorting it here by raw viewer-distance would
+  // silently undo the relevance ranking, so this now passes it through
+  // unchanged in that case instead. Desktop/tablet/landscape use `filtered`
+  // directly (see the JSX below) — no second list-only reorder needed there
+  // either, for the same reason.
   const mobileListListings = useMemo(() => {
     if (!isMobilePortrait) return filtered;
-    return byLocationPriority(filtered);
+    if (!trimmedQuery) return byLocationPriority(filtered);
+    return filtered;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, isMobilePortrait, userLocation]);
+  }, [filtered, isMobilePortrait, userLocation, trimmedQuery]);
 
-  // Desktop/tablet/landscape's own list ordering: cheapest-first (filtered's
-  // own order, untouched) while just browsing, but reordered by the same
-  // nearest/newest rule as mobile the moment a search is actually active —
-  // "Search results should prioritize/reorder matching listings by nearest
-  // distance" wasn't previously true for these breakpoints at all.
-  const desktopListListings = useMemo(() => {
-    if (!trimmedQuery) return filtered;
-    return byLocationPriority(filtered);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, trimmedQuery, userLocation]);
+  // Shared by the debounced auto-search below and executeSearch (Enter/the
+  // search icon/a dropdown pick) — the one place that turns a query string
+  // into a geocoded center plus whichever of our own listings fall within
+  // AREA_MATCH_RADIUS_KM of it. Pure: takes its inputs as arguments and
+  // returns a result rather than touching state itself, so both call sites
+  // can decide independently what to do with it (the debounce only updates
+  // state; executeSearch also moves the camera). OLA's own predictions
+  // (placeResults) are never shown as if they were Beggars Map listings —
+  // they only ever feed the separate "add a new listing here" dropdown/pin
+  // flow, exactly as before.
+  async function resolveAreaMatches(q: string, near: { lat: number; lon: number }) {
+    const results = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
+    const top = results[0];
+    const center = top ? { lat: top.latitude, lon: top.longitude } : null;
+    const nearby = center
+      ? listingsWithDistance.filter((l) => distanceKm(center.lat, center.lon, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM)
+      : [];
+    return { center, nearby, placeResults: results };
+  }
 
-  // Landmark search on the browse map — separate from the substring filter
-  // above (runs on every keystroke, no debounce, purely local): this
-  // debounces a call out to OLA Places so searching a landmark (not
-  // necessarily a listed spot) can fly the map there, AND — new — tries the
-  // query as an area/locality name: the top prediction's coordinate becomes
-  // the center of a radius search against our own listings (areaListings,
-  // AREA_MATCH_RADIUS_KM). Only our own listings are ever shown as search
-  // results this way — OLA's predictions are used purely to resolve "where
-  // is this named area", never rendered as picks themselves, per "don't
-  // return arbitrary external places as restaurant listings".
+  // Auto-search as the user types (debounced, so it doesn't fire an OLA
+  // call on every keystroke): a query that matches our own listings by
+  // name/note/location_label (textMatches, computed live above with no
+  // debounce needed — it's local) is the whole answer, full stop — this
+  // effect doesn't call OLA at all in that case, only stepping in as a
+  // *fallback* once there's truly no local match, to resolve the query as
+  // an area/landmark instead. This replaced an earlier "always geocode too,
+  // then union the two result sets" design — deliberately dropped in favor
+  // of one predictable answer per query; the one thing that trade-off gives
+  // up is a listing whose own name happens to literally contain an area
+  // name (e.g. "... Indiranagar ...") no longer being able to also surface
+  // other, differently-named listings that are merely nearby that area — a
+  // real but narrow edge case, and none of the current listings hit it.
   //
-  // Deliberately NOT skipped when textMatches already has hits: a listing
-  // whose own name happens to contain the query text (a restaurant
-  // literally named "... Indiranagar ...", say) would otherwise silently
-  // hide every *other*, differently-named listing that's genuinely in that
-  // same area — `filtered` unions textMatches with areaListings below
-  // rather than treating them as alternatives, so both surface together.
-  // areaListings is cleared synchronously on every query change (not just
-  // on the debounced resolution) so a stale match from the *previous*
-  // query can't briefly linger merged into the new one's results.
+  // This effect only ever updates state for the *live-typing* preview list;
+  // it deliberately never moves the map camera on its own (that stays tied
+  // to an explicit "search executed" moment — see executeSearch) so the
+  // view doesn't jump around mid-keystroke.
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     setAreaListings([]);
+    setAreaCenter(null);
     if (skipNextSearchRef.current) {
       skipNextSearchRef.current = false;
       return;
     }
-    if (!query.trim()) {
+    if (!trimmedQuery) {
       setPlaceResults([]);
       setSearchPin(null);
       return;
     }
+    if (textMatches.length > 0) {
+      // A local match already answers the query outright — no OLA call
+      // needed, and any previously-open landmark dropdown is stale now.
+      setPlaceResults([]);
+      setSearchResultsOpen(false);
+      return;
+    }
     searchDebounce.current = setTimeout(async () => {
       const near = userLocation ?? BENGALURU_CENTER;
-      const results = await searchPlaces(query, { latitude: near.lat, longitude: near.lon });
-      const areaCenter = results[0];
-      const nearby = areaCenter
-        ? listingsWithDistance.filter(
-            (l) => distanceKm(areaCenter.latitude, areaCenter.longitude, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM
-          )
-        : [];
+      const { center, nearby, placeResults: results } = await resolveAreaMatches(query, near);
+      setAreaCenter(center);
       setAreaListings(nearby);
-      if (nearby.length > 0 || textMatches.length > 0) {
-        // Already have real results (text and/or area) — the raw place
-        // list (meant for the separate "add a new listing at this
-        // landmark" flow) stays hidden rather than showing alongside them.
+      if (nearby.length > 0) {
         setPlaceResults([]);
         setSearchResultsOpen(false);
       } else {
-        // Neither a listing/food match nor a resolvable area with listings
-        // nearby — fall back to the pre-existing landmark-suggestion
+        // No listing/food match and no nearby listings for the resolved
+        // area (if any) — fall back to the pre-existing landmark-suggestion
         // dropdown (still lets a genuinely novel location be added as a new
         // listing) so a query like this doesn't just silently go nowhere.
         setPlaceResults(results);
-        setSearchResultsOpen(true);
+        setSearchResultsOpen(results.length > 0);
       }
     }, 400);
     return () => {
       if (searchDebounce.current) clearTimeout(searchDebounce.current);
     };
-    // textMatches.length deliberately omitted — re-running this effect on
-    // every text-match change would refire the network call before the
-    // query itself changed; the debounced callback above reads the latest
-    // textMatches via closure when it actually runs instead. userLocation
-    // is also omitted from the array but not from the closure: it's already
-    // covered transitively (listingsWithDistance's own deps include it, so
-    // this effect re-runs the moment it resolves, and the closure above
-    // reads the current `userLocation` directly at call time).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, listingsWithDistance]);
+  }, [query, trimmedQuery, listingsWithDistance, textMatches, userLocation]);
 
   // Close the results dropdown on an outside click — it should only go away
   // by picking a result or clearing the search, not stay open forever.
@@ -556,29 +611,88 @@ export default function App() {
     setSheetState(next);
   }
 
+  // Moves the map camera to show a search's result set — deliberately a
+  // separate mechanism from flyToCenter (used by listing selection and
+  // location-picking) so nothing about search can ever touch the popup/pin
+  // selection machinery. One point pans+zooms there (a single text match,
+  // or an area with nothing nearby yet); several fit the camera to bounds
+  // containing all of them.
+  function focusMapOn(points: { lat: number; lng: number }[]) {
+    if (points.length === 0) return;
+    setSearchFocus((prev) => ({ points, token: (prev?.token ?? 0) + 1 }));
+  }
+
+  // The one place a query string actually gets resolved into a result and
+  // the map moves to show it — used by both Enter and a dropdown pick (see
+  // selectSearchResult) so the two converge on identical behavior instead
+  // of the dropdown click being the only path that ever moved the camera.
+  // Text matches (if any) always win outright over geographic resolution —
+  // see textMatches/filtered above for why this is a fallback, not a union.
+  async function executeSearch(q: string) {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    const matches = listingsWithDistance.filter((l) => textRelevance(l, lower) > 0);
+
+    if (matches.length > 0) {
+      setAreaListings([]);
+      setAreaCenter(null);
+      setPlaceResults([]);
+      setSearchResultsOpen(false);
+      setSearchPin(null);
+      focusMapOn(matches.map((l) => ({ lat: l.latitude, lng: l.longitude })));
+      return;
+    }
+
+    const near = userLocation ?? BENGALURU_CENTER;
+    const { center, nearby, placeResults: results } = await resolveAreaMatches(trimmed, near);
+    setAreaCenter(center);
+    setAreaListings(nearby);
+    if (nearby.length > 0) {
+      setPlaceResults([]);
+      setSearchResultsOpen(false);
+      setSearchPin(null);
+      focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
+    } else {
+      // Nothing of ours nearby. Keep the raw OLA suggestions around (a
+      // dropdown reopened later, e.g. by refocusing the input, still has
+      // them), but an executed search always closes the dropdown itself —
+      // pressing Enter is a deliberate "run this now" action, and leaving a
+      // suggestion list open afterward reads as the search not having
+      // actually finished. If the query resolved to *somewhere*, move the
+      // map there anyway so an area search visibly goes to the searched
+      // place even with nothing on the map yet, instead of silently doing
+      // nothing.
+      setPlaceResults(results);
+      setSearchResultsOpen(false);
+      if (center) focusMapOn([{ lat: center.lat, lng: center.lon }]);
+    }
+  }
+
   // OLA's autocomplete already returns coordinates inline, no follow-up
-  // details fetch needed before flying the camera there. Reuses the exact
-  // same flyToCenter mechanism as selectListing and startPickingLocation
-  // below, so all three share identical camera behavior.
+  // details fetch needed before using it as a search center. Converges on
+  // the exact same result pipeline executeSearch uses — a dropdown pick is
+  // just a shortcut for "the geographic center is this exact point" rather
+  // than a different kind of search.
   function selectSearchResult(place: PlaceSuggestion) {
     skipNextSearchRef.current = true;
     setQuery(place.name);
     setPlaceResults([]);
     setSearchResultsOpen(false);
-    setSearchPin({ lat: place.latitude, lng: place.longitude });
-    setFlyToCenter((prev) => ({ center: [place.longitude, place.latitude], token: (prev?.token ?? 0) + 1 }));
-  }
-
-  // Fires the debounced landmark search immediately — for the search bar's
-  // clickable search icon, so it doesn't just sit there decoratively.
-  function runSearchNow() {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    if (!query.trim() || filtered.length > 0) return;
-    const near = userLocation ?? BENGALURU_CENTER;
-    searchPlaces(query, { latitude: near.lat, longitude: near.lon }).then((results) => {
-      setPlaceResults(results);
-      setSearchResultsOpen(true);
-    });
+    const center = { lat: place.latitude, lon: place.longitude };
+    const nearby = listingsWithDistance.filter((l) => distanceKm(center.lat, center.lon, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM);
+    setAreaCenter(center);
+    setAreaListings(nearby);
+    if (nearby.length > 0) {
+      setSearchPin(null);
+      focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
+    } else {
+      // Nothing of ours at the picked place — offer the usual "add this
+      // place" pin instead of leaving the user with only a moved camera.
+      setSearchPin({ lat: place.latitude, lng: place.longitude });
+      focusMapOn([{ lat: place.latitude, lng: place.longitude }]);
+    }
   }
 
   // The one place that fully backs out of an active search without
@@ -593,6 +707,7 @@ export default function App() {
     setQuery('');
     setPlaceResults([]);
     setAreaListings([]);
+    setAreaCenter(null);
     setSearchResultsOpen(false);
     if (!pickingLocation) setSearchPin(null);
   }
@@ -644,6 +759,7 @@ export default function App() {
     setQuery('');
     setPlaceResults([]);
     setAreaListings([]);
+    setAreaCenter(null);
     setSearchResultsOpen(false);
   }, []);
 
@@ -872,6 +988,7 @@ export default function App() {
               showLocate
               onMapClick={handleMapClick}
               flyToCenter={flyToCenter ?? undefined}
+              searchFocus={searchFocus ?? undefined}
               searchPin={searchPin}
               selectedListingId={pickingLocation ? null : selectedListingId}
               onClosePopup={resetToHome}
@@ -899,7 +1016,16 @@ export default function App() {
                   onChange={(e) => setQuery(e.target.value)}
                   onFocus={() => setSearchResultsOpen(true)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') runSearchNow();
+                    // Enter must execute the search on the raw typed text —
+                    // never requires a dropdown suggestion to be selected
+                    // first. preventDefault is defensive (this input isn't
+                    // inside a <form>, so there's no submit to suppress
+                    // today, but Enter shouldn't ever risk a default action
+                    // here regardless).
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      executeSearch(query);
+                    }
                     // Escape always fully backs out of the search (not just
                     // closing the suggestion dropdown) — the one keyboard
                     // way to "dismiss/exit search without selecting
@@ -916,7 +1042,7 @@ export default function App() {
                     </svg>
                   </button>
                 ) : (
-                  <button className="search-icon-button" onClick={runSearchNow} aria-label="Search">
+                  <button className="search-icon-button" onClick={() => executeSearch(query)} aria-label="Search">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                       <circle cx="11" cy="11" r="7" />
                       <line x1="21" y1="21" x2="16.2" y2="16.2" />
@@ -1022,7 +1148,7 @@ export default function App() {
                   ) : null
                 ) : null}
 
-                {(isMobilePortrait ? mobileListListings : desktopListListings).map((listing) => (
+                {(isMobilePortrait ? mobileListListings : filtered).map((listing) => (
                   <div
                     key={listing.id}
                     data-listing-id={listing.id}
