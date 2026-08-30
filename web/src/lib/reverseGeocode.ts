@@ -1,6 +1,7 @@
 // Reverse geocoding for a listing's location — turns the picked lat/lng into
-// a short, human-readable locality descriptor ("Indiranagar",
-// "Malleswaram", "Basavanagudi") for display on the popup card. Uses OLA's
+// a short, human-readable locality descriptor ("7th Main Road,
+// Indiranagar", or just "Malleswaram" when OLA has no street-level data for
+// that point) for display on the popup card. Uses OLA's
 // reverse-geocode endpoint (api.olamaps.io/places/v1/reverse-geocode)
 // — the same provider and API key this app already uses for forward place
 // search (see olaPlaces.ts) — rather than introducing a second geocoding
@@ -24,19 +25,21 @@ function componentOf(components: AddressComponent[], type: string): string | und
   return components.find((c) => c.types.includes(type))?.long_name;
 }
 
-// Short by design (1-2 words) — a full postal address is neither wanted nor
-// useful on a compact popup card. Prefers the neighborhood/locality area
-// alone ("Indiranagar", "Basavanagudi") since that's what every real
-// listing's coordinates resolve to in practice; falls back to the street
-// name alone only when OLA's response has no area component at all, and to
-// the city only as a last resort (never state/country — those never add
-// anything useful for an app that's Bengaluru-only today). Never combines
-// multiple parts into one longer address string.
+// Short by design (never a full postal address) — prefers "Street, Area"
+// when OLA's response has both ("7th Main Road, Indiranagar"), since that's
+// more useful/specific than the area name alone while still being short.
+// Falls back to the area alone when the response has no street-level data
+// for that point (confirmed this genuinely happens for real coordinates —
+// not every reverse-geocode result includes a route/street_address
+// component), then the street alone in the reverse case, then the city only
+// as a last resort (never state/country — those never add anything useful
+// for an app that's Bengaluru-only today).
 function buildLabel(components: AddressComponent[]): string | null {
-  const area = componentOf(components, 'sublocality') ?? componentOf(components, 'neighborhood');
-  if (area) return area;
-
   const street = componentOf(components, 'route') ?? componentOf(components, 'street_address');
+  const area = componentOf(components, 'sublocality') ?? componentOf(components, 'neighborhood');
+
+  if (street && area) return `${street}, ${area}`;
+  if (area) return area;
   if (street) return street;
 
   const city = componentOf(components, 'locality');
