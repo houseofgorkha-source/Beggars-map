@@ -1,7 +1,7 @@
 // Reverse geocoding for a listing's location — turns the picked lat/lng into
-// a short, human-readable descriptor ("100 Feet Road, Indiranagar", or just
-// "Indiranagar, Bengaluru" when street-level data isn't available). Uses
-// OLA's reverse-geocode endpoint (api.olamaps.io/places/v1/reverse-geocode)
+// a short, human-readable locality descriptor ("Indiranagar",
+// "Malleswaram", "Basavanagudi") for display on the popup card. Uses OLA's
+// reverse-geocode endpoint (api.olamaps.io/places/v1/reverse-geocode)
 // — the same provider and API key this app already uses for forward place
 // search (see olaPlaces.ts) — rather than introducing a second geocoding
 // provider. Deliberately NOT Google's Geocoding API: that's a separate
@@ -24,19 +24,24 @@ function componentOf(components: AddressComponent[], type: string): string | und
   return components.find((c) => c.types.includes(type))?.long_name;
 }
 
-// Prefers street + locality-level area ("100 Feet Road, Indiranagar"),
-// falls back to just the area + city ("Indiranagar, Bengaluru") when no
-// street-level component is available, and falls back further from there —
-// never claims a street address the response didn't actually provide.
+// Short by design (1-2 words) — a full postal address is neither wanted nor
+// useful on a compact popup card. Prefers the neighborhood/locality area
+// alone ("Indiranagar", "Basavanagudi") since that's what every real
+// listing's coordinates resolve to in practice; falls back to the street
+// name alone only when OLA's response has no area component at all, and to
+// the city only as a last resort (never state/country — those never add
+// anything useful for an app that's Bengaluru-only today). Never combines
+// multiple parts into one longer address string.
 function buildLabel(components: AddressComponent[]): string | null {
-  const street = componentOf(components, 'street_address') ?? componentOf(components, 'route');
   const area = componentOf(components, 'sublocality') ?? componentOf(components, 'neighborhood');
-  const city = componentOf(components, 'locality');
-
-  if (street && area) return `${street}, ${area}`;
-  if (area && city) return `${area}, ${city}`;
-  if (city) return city;
   if (area) return area;
+
+  const street = componentOf(components, 'route') ?? componentOf(components, 'street_address');
+  if (street) return street;
+
+  const city = componentOf(components, 'locality');
+  if (city) return city;
+
   return null;
 }
 
