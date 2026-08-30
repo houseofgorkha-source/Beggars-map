@@ -159,14 +159,17 @@ export default function App() {
   // fully positioned by CSS (sidePanelTop above), this only ever drives
   // mobile's version. mapFrameRef/frameHeight measure the sheet's actual
   // container so the three snap states are real pixel heights, not a bare
-  // CSS percentage that can't be dragged smoothly. dragHeightRef mirrors
-  // dragHeight but read synchronously inside the pointer-move handler,
-  // which fires faster than React re-renders can keep the state read
-  // fresh — using stale state there produced visible jitter.
+  // CSS percentage that can't be dragged smoothly. The live drag height
+  // itself is NOT React state — see handleSheetDragMove — pointermove fires
+  // far faster than React can usefully re-render, and routing every move
+  // through setState (the previous approach) was re-rendering the entire
+  // App tree per event, which is what made the drag feel janky on real
+  // phones. dragHeightRef is the synchronous source of truth for it,
+  // written directly to the DOM during the drag and read back only once,
+  // at release, for the snap/fling calculation.
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const [frameHeight, setFrameHeight] = useState(0);
   const [sheetState, setSheetState] = useState<SheetState>('map');
-  const [dragHeight, setDragHeight] = useState<number | null>(null);
   const dragHeightRef = useRef<number | null>(null);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
   const dragStartRef = useRef<{ startY: number; startHeight: number; lastY: number; lastT: number; velocity: number } | null>(null);
@@ -531,11 +534,12 @@ export default function App() {
   }, []);
 
   const sheetSnaps = useMemo(() => computeSheetSnaps(frameHeight, peekHeight), [frameHeight, peekHeight]);
-  // While dragging, the finger's raw offset wins; otherwise the current
-  // snap state's own height applies (animated via CSS transition — see
+  // The live drag height is applied imperatively (see handleSheetDragMove),
+  // not through this — this is only what React itself renders: the current
+  // snap state's own height, animated via CSS transition (see
   // .list-panel-outer's `dragging` class toggle below, which turns that
   // transition off only while a drag is actually in progress).
-  const appliedSheetHeight = dragHeight ?? sheetSnaps[sheetState];
+  const appliedSheetHeight = sheetSnaps[sheetState];
 
   // Closes any open popup the moment the user manually expands to LIST mode
   // (by dragging the handle or tapping the "swipe up" hint — both just set
@@ -575,7 +579,15 @@ export default function App() {
     const maxHeight = sheetSnaps.list * 1.04;
     const nextHeight = Math.max(minHeight, Math.min(maxHeight, drag.startHeight + deltaY));
     dragHeightRef.current = nextHeight;
-    setDragHeight(nextHeight);
+    // Written straight to the DOM, not React state — pointermove fires far
+    // faster than React can usefully re-render (every event here used to
+    // call setState on the whole App tree, which is what was making the
+    // drag feel janky/stuttery on real phones). CSS custom properties
+    // update instantly regardless of whether they're set by React's style
+    // diffing or a direct .style mutation, so this is a purely visual
+    // shortcut — nothing downstream (the CSS reading var(--sheet-h)) needs
+    // to know the difference.
+    mapFrameRef.current?.style.setProperty('--sheet-h', `${nextHeight}px`);
 
     const now = performance.now();
     const dt = now - drag.lastT;
@@ -598,7 +610,6 @@ export default function App() {
 
     const releasedHeight = dragHeightRef.current ?? drag.startHeight;
     dragHeightRef.current = null;
-    setDragHeight(null);
 
     const FLING_PX_PER_MS = 0.5;
     let next: SheetState;
@@ -608,6 +619,13 @@ export default function App() {
       const midpoint = (sheetSnaps.map + sheetSnaps.list) / 2;
       next = releasedHeight > midpoint ? 'list' : 'map';
     }
+    // Explicit, rather than relying on the setSheetState-triggered re-render
+    // below to also fix up the DOM: if next === the current sheetState (a
+    // small drag that snaps back to where it started), React bails out of
+    // an identical state update and never re-renders at all — which would
+    // otherwise leave --sheet-h stuck at the raw released height from the
+    // drag instead of animating back to its snap point.
+    mapFrameRef.current?.style.setProperty('--sheet-h', `${sheetSnaps[next]}px`);
     setSheetState(next);
   }
 
