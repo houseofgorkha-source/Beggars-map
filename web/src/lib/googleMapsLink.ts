@@ -7,9 +7,10 @@ export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: nu
   // Covers both of Google's short-link shapes seen in the wild: the Maps
   // app's own share button (maps.app.goo.gl, resolves to a real Maps URL
   // with coordinates) and the general Google share sheet (share.google,
-  // confirmed to resolve to a plain google.com/search results page with NO
-  // coordinates anywhere in it — the regexes below will still return null
-  // for those, which is correct, not a bug: there's nothing to extract).
+  // resolves to a plain google.com/search results page with no coordinates
+  // in the URL at all — the edge function falls back to a places text
+  // search for those and returns latitude/longitude directly instead of a
+  // finalUrl to run regexes on).
   if (/goo\.gl/.test(url) || /(^|\/\/)share\.google\//.test(url)) {
     // A browser can't follow this redirect itself (Google's redirect target
     // doesn't send permissive CORS headers, so a client-side fetch always
@@ -17,10 +18,15 @@ export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: nu
     // function, whose own fetch isn't CORS-restricted. See that function's
     // header comment for the full explanation.
     try {
-      const { data, error } = await supabase.functions.invoke<{ finalUrl?: string }>('resolve-maps-link', {
-        body: { url },
-      });
-      if (error || !data?.finalUrl) return null;
+      const { data, error } = await supabase.functions.invoke<{ finalUrl?: string; latitude?: number; longitude?: number }>(
+        'resolve-maps-link',
+        { body: { url } }
+      );
+      if (error) return null;
+      if (typeof data?.latitude === 'number' && typeof data?.longitude === 'number') {
+        return { latitude: data.latitude, longitude: data.longitude };
+      }
+      if (!data?.finalUrl) return null;
       url = data.finalUrl;
     } catch {
       return null;
