@@ -45,6 +45,14 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   // independently at any point before submission.
   const [locationLabel, setLocationLabel] = useState<string | null>(null);
   const [resolvingLocation, setResolvingLocation] = useState(false);
+  // The reverse-geocode call currently in flight (if any) — submit() awaits
+  // this (bounded by a short timeout) rather than reading `locationLabel`
+  // state directly, so a submit that happens to land in the gap between
+  // picking a location and the lookup resolving still gets the address
+  // instead of silently shipping null. Real listings were observed with
+  // location_label stuck null despite reverse geocoding succeeding for
+  // their exact coordinates when tested directly — this race is why.
+  const locationPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
@@ -76,10 +84,13 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   // arrived, for the same reason.
   useEffect(() => {
     setLocationLabel(null);
+    locationPromiseRef.current = null;
     if (!coords) return;
     let cancelled = false;
     setResolvingLocation(true);
-    reverseGeocode(coords.lat, coords.lon).then((label) => {
+    const promise = reverseGeocode(coords.lat, coords.lon);
+    locationPromiseRef.current = promise;
+    promise.then((label) => {
       if (cancelled) return;
       setLocationLabel(label);
       setResolvingLocation(false);
@@ -157,6 +168,19 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     return uploaded;
   }
 
+  // Waits for a reverse-geocode already in flight, capped at 4s so a slow
+  // (or hung — reverseGeocode has no fetch timeout of its own) request can
+  // never block submission indefinitely. A promise that already resolved
+  // (the common case — geocoding is usually much faster than the user
+  // finishes filling in the rest of the form) settles this immediately.
+  // Never fabricates: no in-flight lookup, or the timeout wins, both yield
+  // null, exactly like today's "geocoding found nothing" case.
+  function resolveLocationLabel(): Promise<string | null> {
+    const promise = locationPromiseRef.current;
+    if (!promise) return Promise.resolve(null);
+    return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000))]);
+  }
+
   async function submit() {
     setError(null);
     const priceNumber = Number(price);
@@ -177,7 +201,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
         return;
       }
 
-      const photos = await uploadPhotos(userId);
+      const [photos, resolvedLabel] = await Promise.all([uploadPhotos(userId), resolveLocationLabel()]);
 
       const { data: inserted, error: insertError } = await supabase
         .from('listings')
@@ -195,8 +219,9 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           longitude: coords.lon,
           // Best-effort human-readable descriptor for the same coords —
           // null when reverse geocoding hasn't resolved (or found) anything
-          // by submission time, never a placeholder/fabricated value.
-          location_label: locationLabel,
+          // within resolveLocationLabel's own wait window, never a
+          // placeholder/fabricated value.
+          location_label: resolvedLabel,
         })
         .select('id')
         .single();

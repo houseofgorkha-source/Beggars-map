@@ -31,6 +31,19 @@ const CITIES = ['Bengaluru', 'Delhi', 'Mumbai', 'Kolkata', 'Chennai', 'Guwahati'
 // a real match without pulling in listings from a clearly different area.
 const AREA_MATCH_RADIUS_KM = 3;
 
+// Bias for OLA's autocomplete/geocoding calls below — without this, OLA
+// ranks purely by text relevance across all of India, so a cuisine/dish
+// term ("biryani", "thali", "north indian") resolves to some same-named
+// restaurant in a completely different city (confirmed live: "biryani"
+// with no bias resolved to a Hyderabad restaurant, "thali" to one in
+// Jaipur), which then finds zero nearby Beggars Map listings and falls
+// through to showing that irrelevant out-of-city result. The app is
+// Bengaluru-only today (see CITIES above), so this fixed center is a real,
+// load-bearing fallback, not an invented location — it's superseded by the
+// visitor's own location the moment that's available (see the search
+// effect below).
+const BENGALURU_CENTER = { lat: 12.9716, lon: 77.5946 };
+
 // A fast, single-direction downward drag, measured the same way the sheet
 // drag gesture measures its own pointer movement (distance + elapsed time)
 // — see the home-exit touch handlers below.
@@ -334,7 +347,8 @@ export default function App() {
       return;
     }
     searchDebounce.current = setTimeout(async () => {
-      const results = await searchPlaces(query);
+      const near = userLocation ?? BENGALURU_CENTER;
+      const results = await searchPlaces(query, { latitude: near.lat, longitude: near.lon });
       const areaCenter = results[0];
       const nearby = areaCenter
         ? listingsWithDistance.filter(
@@ -363,7 +377,11 @@ export default function App() {
     // textMatches.length deliberately omitted — re-running this effect on
     // every text-match change would refire the network call before the
     // query itself changed; the debounced callback above reads the latest
-    // textMatches via closure when it actually runs instead.
+    // textMatches via closure when it actually runs instead. userLocation
+    // is also omitted from the array but not from the closure: it's already
+    // covered transitively (listingsWithDistance's own deps include it, so
+    // this effect re-runs the moment it resolves, and the closure above
+    // reads the current `userLocation` directly at call time).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, listingsWithDistance]);
 
@@ -556,7 +574,8 @@ export default function App() {
   function runSearchNow() {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     if (!query.trim() || filtered.length > 0) return;
-    searchPlaces(query).then((results) => {
+    const near = userLocation ?? BENGALURU_CENTER;
+    searchPlaces(query, { latitude: near.lat, longitude: near.lon }).then((results) => {
       setPlaceResults(results);
       setSearchResultsOpen(true);
     });
