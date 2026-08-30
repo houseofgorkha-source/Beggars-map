@@ -112,10 +112,21 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
         setLocating(false);
         onPickOnMap({ lat: pos.coords.latitude, lon: pos.coords.longitude }, 'current-location');
       },
-      () => {
-        setError('Could not get your location. Try another option below.');
+      (err) => {
+        // A prior denial for this site means the browser never shows the
+        // permission prompt again — it fails immediately with code 1
+        // (PERMISSION_DENIED). That reads as "nothing happened" unless the
+        // message says so explicitly, since there's no popup to explain it.
+        const message =
+          err.code === err.PERMISSION_DENIED
+            ? 'Location access is blocked for this site — check your browser or phone’s site settings, or use another option below.'
+            : err.code === err.TIMEOUT
+              ? 'Location took too long to respond. Try another option below.'
+              : 'Could not get your location. Try another option below.';
+        setError(message);
         setLocating(false);
-      }
+      },
+      { timeout: 10000 }
     );
   }
 
@@ -131,6 +142,15 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     }
     setCoords({ lat: parsed.latitude, lon: parsed.longitude });
     setMapsLink('');
+  }
+
+  // Lets the user back out of a pin they no longer want, from any of the
+  // three location sources — the effect above already resets
+  // locationLabel/resolvingLocation to their empty state whenever coords
+  // goes null, so there's nothing else to clean up here.
+  function clearLocation() {
+    setCoords(null);
+    setError(null);
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -322,12 +342,15 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           <label className="field-label">Location</label>
           {coords ? (
             <div className="pinned-banner">
-              Pinned ✓ ({coords.lat.toFixed(4)}, {coords.lon.toFixed(4)})
-              {resolvingLocation ? (
-                <span className="pinned-location pinned-location-resolving">Finding the address…</span>
-              ) : locationLabel ? (
-                <span className="pinned-location">{locationLabel}</span>
-              ) : null}
+              <div className="pinned-banner-text">
+                Pinned ✓ ({coords.lat.toFixed(4)}, {coords.lon.toFixed(4)})
+                {resolvingLocation ? (
+                  <span className="pinned-location pinned-location-resolving">Finding the address…</span>
+                ) : locationLabel ? (
+                  <span className="pinned-location">{locationLabel}</span>
+                ) : null}
+              </div>
+              <button type="button" className="pinned-clear-button" onClick={clearLocation} aria-label="Clear pinned location">✕</button>
             </div>
           ) : null}
 

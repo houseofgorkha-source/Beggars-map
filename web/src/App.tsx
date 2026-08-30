@@ -770,6 +770,7 @@ export default function App() {
     setLegalTab(null);
     setShowAbout(false);
     setSelectedListingId(null);
+    setSheetState('map');
     // An active search is one more "internal view" back/edge-swipe should
     // close rather than exiting the site (see hasOpenState below) — so
     // fully returning home clears it the same way it closes every other
@@ -793,7 +794,13 @@ export default function App() {
   // excluded — those are lighter-weight transient UI a back-press wouldn't
   // be expected to specifically target, and they close on their own (an
   // outside click, selecting a result) well before the query itself does.
-  const hasOpenState = showAdd || legalTab !== null || showAbout || selectedListingId !== null || trimmedQuery.length > 0;
+  // Mobile portrait's LIST mode is included too — without it, expanding the
+  // sheet doesn't push a history entry, so a back-press/edge-swipe while the
+  // list is open has nothing of the app's own to consume and falls straight
+  // through to real browser back navigation (exiting the site instead of
+  // just collapsing the sheet back to MAP mode).
+  const hasOpenState =
+    showAdd || legalTab !== null || showAbout || selectedListingId !== null || trimmedQuery.length > 0 || sheetState === 'list';
 
   // Keeps one browser-history entry in sync with hasOpenState so back/
   // side-swipe closes an internal view instead of leaving the site — this

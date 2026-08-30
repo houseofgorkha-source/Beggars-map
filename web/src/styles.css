@@ -1421,12 +1421,36 @@ body {
 }
 
 .pinned-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
   background: #fce9f2;
   color: #ec4899;
   font-weight: 600;
   border-radius: 10px;
   padding: 10px 12px;
   margin-bottom: 8px;
+}
+
+.pinned-clear-button {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #ec4899;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pinned-clear-button:hover {
+  color: #c23e79;
 }
 
 /* The resolved human-readable descriptor (or a "resolving" placeholder),
@@ -1724,6 +1748,16 @@ body {
   .about-button {
     display: inline-flex;
     align-items: center;
+  }
+  /* Mobile's About modal is the one place the full mark + wordmark lockup
+     was still showing (the sidebar hides the whole block instead — see
+     .about-panel .about-logo-block above). On a phone-width screen the "B"
+     mark alone is enough branding for a page that's already inside the
+     app; scoped to this phone-class query specifically so tablet (which
+     also falls back to this same modal at its own breakpoints) keeps
+     showing the full lockup, unchanged. */
+  .about-logo-word {
+    display: none;
   }
   /* Tighter header so the map gets more of the screen — was wrapping to
      two lines and eating ~70px of vertical space before the map even

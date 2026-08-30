@@ -1,14 +1,27 @@
+import { supabase } from './supabase';
+
 export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: number; longitude: number } | null> {
   let url = rawUrl.trim();
   if (!url) return null;
 
-  if (/goo\.gl/.test(url)) {
-    // Browser fetch enforces CORS, unlike React Native's — if Google doesn't
-    // send permissive CORS headers on this redirect, this throws and we fall
-    // through to null. Full-length @lat,lng links below don't need this step.
+  // Covers both of Google's short-link shapes seen in the wild: the Maps
+  // app's own share button (maps.app.goo.gl, resolves to a real Maps URL
+  // with coordinates) and the general Google share sheet (share.google,
+  // confirmed to resolve to a plain google.com/search results page with NO
+  // coordinates anywhere in it — the regexes below will still return null
+  // for those, which is correct, not a bug: there's nothing to extract).
+  if (/goo\.gl/.test(url) || /(^|\/\/)share\.google\//.test(url)) {
+    // A browser can't follow this redirect itself (Google's redirect target
+    // doesn't send permissive CORS headers, so a client-side fetch always
+    // throws) — resolved server-side instead via the resolve-maps-link edge
+    // function, whose own fetch isn't CORS-restricted. See that function's
+    // header comment for the full explanation.
     try {
-      const response = await fetch(url);
-      url = response.url || url;
+      const { data, error } = await supabase.functions.invoke<{ finalUrl?: string }>('resolve-maps-link', {
+        body: { url },
+      });
+      if (error || !data?.finalUrl) return null;
+      url = data.finalUrl;
     } catch {
       return null;
     }
