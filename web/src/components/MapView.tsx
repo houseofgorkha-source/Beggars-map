@@ -154,6 +154,17 @@ export default function MapView({
           zoom: 12,
           mapId,
           disableDefaultUI: true,
+          // Google's own base-map points of interest (restaurant/shop/
+          // transit icons baked into the tiles themselves) are independently
+          // clickable by default — disableDefaultUI only hides UI controls,
+          // it has no effect on this. Left enabled, tapping on or near one
+          // of Google's own POI icons opens Google's *native* info card
+          // (name + address + an external-link icon — nothing like our own
+          // compact popup) and recenters the camera toward it, entirely
+          // bypassing our own markers/state. Confirmed via screenshots: what
+          // looked like "clicking a pin moves the map" was this firing
+          // instead of (or alongside) our own marker's click handler.
+          clickableIcons: false,
           // Google's built-in zoom control is a fixed vertical pair we can't
           // restyle (no size/orientation option in the current API) — a
           // custom horizontal pill (`.zoom-control` below) replaces it

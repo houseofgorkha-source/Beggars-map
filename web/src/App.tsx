@@ -66,7 +66,7 @@ const MOBILE_PORTRAIT_QUERY = '(max-width: 720px) and (orientation: portrait)';
 // map "gets out of the way"). Selecting a listing always shows its details
 // via MapView's own map-anchored popup, never inside the sheet — so
 // selection doesn't add anything to what the sheet itself has to display,
-// it just forces MAP mode if LIST mode was open (see selectListing) so that
+// it just forces MAP mode if LIST mode was open (see selectListingCore) so that
 // popup is actually visible. There is deliberately no third "partial" state
 // — that in-between size was what let the map and list fight over the same
 // screen in the old design.
@@ -455,7 +455,7 @@ export default function App() {
   // Brings the selected listing's row into view when it might be scrolled
   // off-screen — desktop/tablet/landscape only, where the list stays
   // visible beside the map at all times. Mobile portrait collapses the
-  // sheet on selection instead (see selectListing below), so the list
+  // sheet on selection instead (see selectListingCore below), so the list
   // isn't even visible at the moment of selection there. `block: 'nearest'`
   // (no smooth scroll) so this can't fight a user's own in-progress scroll.
   useEffect(() => {
@@ -548,7 +548,7 @@ export default function App() {
   // the drag handle itself). Matches the existing convention that the map's
   // own controls (zoom/locate/click-hint) already hide themselves once LIST
   // mode makes the map "not the active surface" — the popup is a map
-  // control in the same sense. selectListing's own forced MAP-mode
+  // control in the same sense. selectListingCore's own forced MAP-mode
   // collapse (which runs in the same tick as setting the selection) means
   // this never fights a fresh selection — sheetState is already back to
   // 'map' by the time this effect would otherwise see 'list'.
@@ -712,22 +712,41 @@ export default function App() {
     if (!pickingLocation) setSearchPin(null);
   }
 
-  // Selecting a listing (map marker or list card) shares the exact same
-  // camera mechanism as a landmark search — same pan+zoom, same reliability
-  // — instead of relying solely on the info-window effect's own panTo.
-  // Opens the same map-anchored popup (MapView's own, see `hidePopup` below)
-  // on every viewport, mobile included — a map-pin tap and a list-row tap
-  // now always converge on the exact same "full info" surface.
+  // The shared part of selecting a listing, regardless of how it was
+  // triggered — opens the same map-anchored popup (MapView's own, see
+  // `hidePopup` below) on every viewport, mobile included, deliberately
+  // never touching the camera itself. Camera movement is each caller's own
+  // decision (see selectListingFromPin/selectListingFromList below) —
+  // selection and camera movement used to be fused into one function that
+  // always flew the camera, which is what made clicking a pin that's
+  // already visible on-screen jump the map anyway.
   //
   // On mobile portrait, also forces the sheet back to MAP mode: if a list
   // tap happened while the sheet was expanded (LIST mode covers most of the
   // frame), the popup would otherwise render hidden behind it. This is what
   // makes "tapping a list row opens the same info as tapping a pin" actually
   // true in practice, not just in theory.
-  function selectListing(id: string) {
+  function selectListingCore(id: string) {
     setSelectedListingId(id);
     setSearchPin(null);
     if (isMobilePortrait) setSheetState('map');
+  }
+
+  // Tapping a pin directly on the map: the listing is, by definition,
+  // already exactly where the user just tapped — the camera must stay
+  // completely untouched (center, zoom, everything) and only the popup
+  // opens, anchored to that same pin via MapView's own continuous
+  // measurement of its on-screen position (unrelated to camera state).
+  function selectListingFromPin(id: string) {
+    selectListingCore(id);
+  }
+
+  // Tapping a row in the list: unlike a pin, the listing might currently be
+  // off-screen (that's the whole point of a list), so flying the camera
+  // there — same pan+zoom mechanism a landmark search uses — is still the
+  // right call here. Unchanged from before this split.
+  function selectListingFromList(id: string) {
+    selectListingCore(id);
     const listing = listings.find((l) => l.id === id);
     if (listing) {
       setFlyToCenter((prev) => ({ center: [listing.longitude, listing.latitude], token: (prev?.token ?? 0) + 1 }));
@@ -984,7 +1003,7 @@ export default function App() {
           >
             <MapView
               listings={filtered}
-              onSelectListing={pickingLocation ? () => {} : selectListing}
+              onSelectListing={pickingLocation ? () => {} : selectListingFromPin}
               showLocate
               onMapClick={handleMapClick}
               flyToCenter={flyToCenter ?? undefined}
@@ -1153,7 +1172,7 @@ export default function App() {
                     key={listing.id}
                     data-listing-id={listing.id}
                     className={`list-card${listing.id === selectedListingId ? ' list-card-selected' : ''}`}
-                    onClick={() => selectListing(listing.id)}
+                    onClick={() => selectListingFromList(listing.id)}
                   >
                     <div className="list-card-header">
                       <span className="list-card-name">{listing.name}</span>
