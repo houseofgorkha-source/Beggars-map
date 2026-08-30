@@ -40,6 +40,9 @@ yarn-error.*
 # Supabase CLI session-local link state
 supabase/.temp/
 
+# local DB backups (scripts/backup-local-db.mjs) — never intended for source control
+supabase/backups/
+
 # generated native folders
 /ios
 /android

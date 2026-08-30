@@ -31,7 +31,10 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "db:backup": "node scripts/backup-local-db.mjs",
+    "db:restore": "node scripts/restore-local-db.mjs",
+    "db:reset:safe": "node scripts/safe-reset-local-db.mjs"
   },
   "private": true
 }
