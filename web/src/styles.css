@@ -341,6 +341,21 @@ body {
   overflow: hidden;
 }
 
+/* Sits in normal flow above .map-frame (not an overlay on the map itself,
+   unlike .map-overlay-row) — same visual language as .about-tagline (pink,
+   bold, centered), reused rather than inventing a new style. A sibling
+   here, not a child of .map-frame, so it shrinks .map-frame's own
+   ResizeObserver-measured height naturally through flexbox instead of
+   needing any special-casing in the mobile sheet-height math. */
+.map-banner-tagline {
+  flex-shrink: 0;
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pink-accent);
+  text-align: center;
+}
+
 .map-frame {
   width: 100%;
   position: relative;
@@ -1758,6 +1773,14 @@ body {
      showing the full lockup, unchanged. */
   .about-logo-word {
     display: none;
+  }
+  /* Smaller and tighter here too — this still takes real space above the
+     map (see .map-banner-tagline itself), and mobile's vertical budget is
+     already tight enough that every extra header line has historically had
+     to earn its keep (see the .topbar comment right below). */
+  .map-banner-tagline {
+    font-size: 13px;
+    margin-bottom: 8px;
   }
   /* Tighter header so the map gets more of the screen — was wrapping to
      two lines and eating ~70px of vertical space before the map even

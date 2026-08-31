@@ -1018,6 +1018,8 @@ export default function App() {
         </section>
 
         <div className="map-panel">
+          <p className="map-banner-tagline">Why do we call it Beggars Map? Why not? Why beat around the bush? 😄</p>
+
           <div
             className={`map-frame${isMobilePortrait && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}
             ref={mapFrameRef}
