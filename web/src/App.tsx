@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { supabase } from './lib/supabase';
-import { searchPlaces, type PlaceSuggestion } from './lib/olaPlaces';
+import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPlaces';
 import { formatRelativeTime } from './lib/relativeTime';
 import { distanceKm } from './lib/distance';
 import MapView from './components/MapView';
@@ -373,9 +373,19 @@ export default function App() {
   // (placeResults) are never shown as if they were Beggars Map listings —
   // they only ever feed the separate "add a new listing here" dropdown/pin
   // flow, exactly as before.
+  //
+  // The geographic center is the best NAME MATCH for the query
+  // (bestPlaceMatch), not OLA's raw top prediction — OLA ranks predictions
+  // mostly by proximity to `near`, not by how well the name matches the
+  // query text (confirmed live: "Juicy Spot" biased at Bengaluru center
+  // returned an unrelated street address as prediction #1, with the actual
+  // "Juicy SPOT" restaurant only at #2, which used to make the area-match
+  // radius check below run against the wrong point entirely). Falls back to
+  // results[0] only when nothing clears bestPlaceMatch's similarity bar, so
+  // a query that only resolves on proximity grounds still gets a center.
   async function resolveAreaMatches(q: string, near: { lat: number; lon: number }) {
     const results = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
-    const top = results[0];
+    const top = bestPlaceMatch(q, results) ?? results[0];
     const center = top ? { lat: top.latitude, lon: top.longitude } : null;
     const nearby = center
       ? listingsWithDistance.filter((l) => distanceKm(center.lat, center.lon, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM)
@@ -426,17 +436,17 @@ export default function App() {
       const { center, nearby, placeResults: results } = await resolveAreaMatches(query, near);
       setAreaCenter(center);
       setAreaListings(nearby);
-      if (nearby.length > 0) {
-        setPlaceResults([]);
-        setSearchResultsOpen(false);
-      } else {
-        // No listing/food match and no nearby listings for the resolved
-        // area (if any) — fall back to the pre-existing landmark-suggestion
-        // dropdown (still lets a genuinely novel location be added as a new
-        // listing) so a query like this doesn't just silently go nowhere.
-        setPlaceResults(results);
-        setSearchResultsOpen(results.length > 0);
-      }
+      // Nearby Beggars Map listings and OLA's own place suggestions are two
+      // independent answers to the same query, not alternatives — one must
+      // never suppress the other. A query can simultaneously have existing
+      // nearby listings AND be the name of a real place that isn't one of
+      // them yet (this is exactly how the "Juicy Spot" bug happened: an
+      // unrelated listing happened to be within AREA_MATCH_RADIUS_KM of the
+      // resolved center, which used to wipe out the real "Juicy SPOT"
+      // suggestion entirely instead of showing both). Always keep whatever
+      // OLA found, regardless of what nearby turned out to be.
+      setPlaceResults(results);
+      setSearchResultsOpen(results.length > 0);
     }, 400);
     return () => {
       if (searchDebounce.current) clearTimeout(searchDebounce.current);
@@ -667,24 +677,29 @@ export default function App() {
     const { center, nearby, placeResults: results } = await resolveAreaMatches(trimmed, near);
     setAreaCenter(center);
     setAreaListings(nearby);
+    // Nearby Beggars Map listings and OLA's own suggestions are independent
+    // answers, never mutually suppressed — a query can have both, and
+    // neither should hide the other just because the other happens to
+    // exist (see resolveAreaMatches above). `results` is kept in
+    // `placeResults` so a genuine suggestion is never thrown away — but
+    // *executing* a search (Enter/the icon) is a deliberate "run this now"
+    // action, and the map has already moved to show the answer, so the
+    // dropdown itself always closes here regardless of what was found —
+    // leaving it open would mean stale suggestions still hanging below the
+    // search bar after the camera has already moved on. Refocusing the
+    // input (see its onFocus handler) still reopens whatever's in
+    // `placeResults`, so nothing found here is actually lost, just not
+    // left open uninvited.
+    setPlaceResults(results);
+    setSearchResultsOpen(false);
     if (nearby.length > 0) {
-      setPlaceResults([]);
-      setSearchResultsOpen(false);
       setSearchPin(null);
       focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
-    } else {
-      // Nothing of ours nearby. Keep the raw OLA suggestions around (a
-      // dropdown reopened later, e.g. by refocusing the input, still has
-      // them), but an executed search always closes the dropdown itself —
-      // pressing Enter is a deliberate "run this now" action, and leaving a
-      // suggestion list open afterward reads as the search not having
-      // actually finished. If the query resolved to *somewhere*, move the
-      // map there anyway so an area search visibly goes to the searched
-      // place even with nothing on the map yet, instead of silently doing
-      // nothing.
-      setPlaceResults(results);
-      setSearchResultsOpen(false);
-      if (center) focusMapOn([{ lat: center.lat, lng: center.lon }]);
+    } else if (center) {
+      // Nothing of ours nearby — move the map to the resolved place anyway
+      // so the search visibly goes somewhere even with nothing on the map
+      // yet, instead of silently doing nothing.
+      focusMapOn([{ lat: center.lat, lng: center.lon }]);
     }
   }
 
