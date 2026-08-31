@@ -91,13 +91,30 @@ function useMediaQuery(query: string) {
 // zero list content showing through. LIST mode stays a generous fraction of the
 // frame, same idea as before, just without the old "partial" middle step —
 // but capped by `containerHeight - TOP_RESERVE_PX` as a hard ceiling, not
-// just a fraction of the frame. Without that hard cap, a short (landscape)
-// frame could compute a LIST height tall enough that the sheet's own top
-// edge — where the drag handle lives — ends up underneath the floating
+// just a fraction of the frame. Without that hard cap, a tall-enough frame
+// could compute a LIST height tall enough that the sheet's own top edge —
+// where the drag handle lives — ends up underneath the floating
 // search/Contribute row pinned near the frame's actual top edge. That row
-// sits at a higher z-index, so it silently swallows the drag handle's
-// pointer events, making the sheet impossible to drag back down.
-const TOP_RESERVE_PX = 70;
+// sits at a higher z-index (.map-overlay-row, z-index 5, vs. the sheet's 4),
+// so it silently swallows the drag handle's pointer events before they ever
+// reach it, making the sheet impossible to drag back down.
+//
+// 70 was too small for this: on portrait phones the overlay row is two
+// stacked rows (search bar, then the Add button on its own line — see the
+// portrait-only .map-overlay-row rule in styles.css), whose real rendered
+// bottom edge is ~100-108px from the frame's top (the same figure
+// .map-search-results's own portrait `top: 108px` was independently tuned
+// to clear). With TOP_RESERVE_PX at 70, `containerHeight - 70` is the
+// binding (smaller) branch of the Math.min below for every realistic phone
+// frame height (the crossover against the 0.86 branch lands at
+// containerHeight === 500px, and only frames taller than ~750px would clear
+// the row through the 0.86 branch instead) — so on effectively every real
+// device, the drag handle's top landed at y=70, squarely inside the overlay
+// row's ~14-108px footprint, and every touch meant for the handle was
+// consumed by the row above it instead. 116 keeps the handle's top at or
+// below the row's real bottom edge (108px, plus a small buffer) regardless
+// of which branch of the Math.min ends up binding.
+const TOP_RESERVE_PX = 116;
 function computeSheetSnaps(containerHeight: number, peekContentHeight: number) {
   const map = Math.round(Math.max(48, Math.min(containerHeight * 0.6, peekContentHeight)));
   const list = Math.round(Math.max(map + 24, Math.min(containerHeight * 0.86, containerHeight - TOP_RESERVE_PX)));
