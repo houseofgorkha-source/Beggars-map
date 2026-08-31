@@ -321,24 +321,30 @@ export default function MapView({
   }, [flyToCenter?.token, mapLoading]);
 
   // Moves the camera to show an executed search's result set. Keyed on the
-  // token, same reasoning as flyToCenter above. A single point (one text
-  // match, or an area with nothing nearby yet) pans+zooms there directly;
-  // several fit the camera to bounds containing all of them, reusing the
-  // same over-zoom guard the initial all-listings fitBounds already uses
-  // below, so a tight cluster of 2-3 nearby results doesn't zoom in
-  // absurdly far. Entirely separate from the popup/pin-selection effects
-  // above — this never touches selectedMarkerElRef or popupPosition.
+  // token, same reasoning as flyToCenter above. Always goes through
+  // fitBounds (a single point becomes a zero-area bounds) rather than
+  // special-casing it with panTo, so every case shares the same padding
+  // fix below and the same over-zoom guard clamps a single point back to
+  // 15 exactly like it already did for a tight multi-point cluster.
+  //
+  // Padding is an asymmetric object, not a flat number — a flat number
+  // pads every side of the map equally, which isn't enough to keep a
+  // fitted point clear of the app's own floating chrome sitting on top of
+  // the map itself: the search bar at the top, and (desktop/tablet/
+  // landscape) the ~340-460px list panel on the right. Confirmed live on
+  // production: a "dosa" search correctly computed bounds including all 4
+  // matches, but 2 of them rendered directly underneath the list panel/
+  // search bar — geographically "in view," visually invisible, reading as
+  // "the map shows no results." Generous right/top padding clears both;
+  // bottom/left stay modest since nothing floats there. Entirely separate
+  // from the popup/pin-selection effects above — this never touches
+  // selectedMarkerElRef or popupPosition.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !searchFocus || mapLoading || searchFocus.points.length === 0) return;
-    if (searchFocus.points.length === 1) {
-      map.panTo(searchFocus.points[0]);
-      map.setZoom(15);
-      return;
-    }
     const bounds = new google.maps.LatLngBounds();
     searchFocus.points.forEach((p) => bounds.extend(p));
-    map.fitBounds(bounds, 60);
+    map.fitBounds(bounds, { top: 100, right: 380, bottom: 60, left: 60 });
     google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
       const zoom = map.getZoom();
       if (zoom !== undefined && zoom > 15) map.setZoom(15);

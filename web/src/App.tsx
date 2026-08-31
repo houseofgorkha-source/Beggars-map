@@ -118,6 +118,17 @@ export default function App() {
 
   const [placeResults, setPlaceResults] = useState<PlaceSuggestion[]>([]);
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
+  // True while a debounced OLA resolution is pending or in flight for the
+  // *current* query — gates the "No listings match your search, want to
+  // add it to the map?" empty state below. Without this, that message (and
+  // its clickable button) rendered the instant `areaListings`/`areaCenter`
+  // were synchronously reset at the top of every keystroke's debounce-
+  // effect run, well before the 400ms debounce timer plus however long the
+  // OLA fetch itself takes — confirmed live: clicking the button inside
+  // that ~600-900ms window opened Add Listing with no location, because
+  // `areaCenter` was still null at click time. It isn't "resolved to
+  // nothing", it just hasn't resolved yet.
+  const [searching, setSearching] = useState(false);
   // Populated by the search effect below only when the typed query matches
   // no listing by name/note/location_label — OLA resolves it as an
   // area/landmark instead (see AREA_MATCH_RADIUS_KM), and these are our own
@@ -394,18 +405,18 @@ export default function App() {
   }
 
   // Auto-search as the user types (debounced, so it doesn't fire an OLA
-  // call on every keystroke): a query that matches our own listings by
-  // name/note/location_label (textMatches, computed live above with no
-  // debounce needed — it's local) is the whole answer, full stop — this
-  // effect doesn't call OLA at all in that case, only stepping in as a
-  // *fallback* once there's truly no local match, to resolve the query as
-  // an area/landmark instead. This replaced an earlier "always geocode too,
-  // then union the two result sets" design — deliberately dropped in favor
-  // of one predictable answer per query; the one thing that trade-off gives
-  // up is a listing whose own name happens to literally contain an area
-  // name (e.g. "... Indiranagar ...") no longer being able to also surface
-  // other, differently-named listings that are merely nearby that area — a
-  // real but narrow edge case, and none of the current listings hit it.
+  // call on every keystroke). Local text matches (textMatches, computed
+  // live above with no debounce needed — it's local) and OLA's own place
+  // suggestions are two independent answers to the same query, not
+  // alternatives — filtered/textMatches above already makes local matches
+  // win the *listing list*, but that must not stop this effect from also
+  // fetching OLA suggestions for the *dropdown*. This used to skip the OLA
+  // call entirely whenever a local match existed ("dosa" matching Vidyarthi
+  // Bhavan's note, say), which meant the suggestion dropdown simply never
+  // appeared for a huge share of real queries — confirmed live: typing
+  // "dosa" only ever filtered the list, no suggestions ever showed. Now
+  // every non-empty query gets exactly one debounced OLA call, same as
+  // before, just no longer gated on textMatches being empty.
   //
   // This effect only ever updates state for the *live-typing* preview list;
   // it deliberately never moves the map camera on its own (that stays tied
@@ -413,29 +424,45 @@ export default function App() {
   // view doesn't jump around mid-keystroke.
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    setAreaListings([]);
-    setAreaCenter(null);
+    // Checked BEFORE resetting areaListings/areaCenter below — this is the
+    // one case where this effect must NOT touch that state at all. Picking
+    // a dropdown suggestion (selectSearchResult) sets `query` (via
+    // setQuery), which re-triggers this effect (query is a dependency);
+    // selectSearchResult had already set areaListings/areaCenter to the
+    // exact resolved values for that pick just moments earlier in the same
+    // update — resetting them here (as this effect used to do unconditionally,
+    // before even checking this flag) immediately wiped that out again,
+    // leaving areaCenter null right after a pick. Confirmed live: selecting
+    // a suggestion set areaCenter correctly, then this effect's own reset
+    // cleared it back to null before the user ever clicked "add it to the
+    // map", which is why that flow opened Add Listing with no location.
     if (skipNextSearchRef.current) {
       skipNextSearchRef.current = false;
+      setSearching(false);
       return;
     }
+    setAreaListings([]);
+    setAreaCenter(null);
     if (!trimmedQuery) {
       setPlaceResults([]);
       setSearchPin(null);
+      setSearching(false);
       return;
     }
-    if (textMatches.length > 0) {
-      // A local match already answers the query outright — no OLA call
-      // needed, and any previously-open landmark dropdown is stale now.
-      setPlaceResults([]);
-      setSearchResultsOpen(false);
-      return;
-    }
+    // Nothing about the *current* query is resolved yet — the reset above
+    // already cleared the previous query's areaListings/areaCenter, and
+    // `filtered` (see above) reads those synchronously, before this
+    // debounce timer has even started. Without `searching` gating the
+    // empty-state message, it would render (and its "add it to the map"
+    // button would be clickable) for this entire window even though the
+    // real answer isn't in yet.
+    setSearching(true);
     searchDebounce.current = setTimeout(async () => {
       const near = userLocation ?? BENGALURU_CENTER;
       const { center, nearby, placeResults: results } = await resolveAreaMatches(query, near);
       setAreaCenter(center);
       setAreaListings(nearby);
+      setSearching(false);
       // Nearby Beggars Map listings and OLA's own place suggestions are two
       // independent answers to the same query, not alternatives — one must
       // never suppress the other. A query can simultaneously have existing
@@ -444,14 +471,41 @@ export default function App() {
       // unrelated listing happened to be within AREA_MATCH_RADIUS_KM of the
       // resolved center, which used to wipe out the real "Juicy SPOT"
       // suggestion entirely instead of showing both). Always keep whatever
-      // OLA found, regardless of what nearby turned out to be.
+      // OLA found, regardless of what nearby turned out to be, and
+      // regardless of whether a local text match also exists.
       setPlaceResults(results);
       setSearchResultsOpen(results.length > 0);
+      // A genuinely novel place — no local text match, and nothing of ours
+      // nearby the resolved center either — is exactly the "No listings
+      // match your search, want to add it to the map?" empty state (see
+      // filtered above). That state used to leave the map camera and
+      // searchPin completely untouched, so a user had no visual indication
+      // of *where* the searched place actually is — confirmed live:
+      // searching "Tandoori Taal - Palace Road" showed the empty-state
+      // message with the map still sitting at its default view and no pin
+      // anywhere. This is the one live-typing exception to "camera
+      // movement stays reserved for an explicit search" (see this effect's
+      // own doc comment above) — scoped exactly to the condition that
+      // produces that empty state, so an ordinary query that already has a
+      // local or nearby match still can't jump the view around mid-
+      // keystroke. `searchPin` is also this effect's one authoritative
+      // source for it — cleared whenever this condition no longer holds
+      // (a local match now matches, nearby listings turned up, or nothing
+      // resolved at all) so a stale pin from an earlier, different query
+      // can never linger. `addSearchedPlace` (below) reads this same
+      // `center` value via `areaCenter`, so the pin and Add Listing's
+      // initial location always agree.
+      if (textMatches.length === 0 && nearby.length === 0 && center) {
+        setSearchPin({ lat: center.lat, lng: center.lon });
+        focusMapOn([{ lat: center.lat, lng: center.lon }]);
+      } else {
+        setSearchPin(null);
+      }
     }, 400);
     return () => {
       if (searchDebounce.current) clearTimeout(searchDebounce.current);
     };
-  }, [query, trimmedQuery, listingsWithDistance, textMatches, userLocation]);
+  }, [query, trimmedQuery, listingsWithDistance, userLocation]);
 
   // Close the results dropdown on an outside click — it should only go away
   // by picking a result or clearing the search, not stay open forever.
@@ -663,43 +717,62 @@ export default function App() {
     const lower = trimmed.toLowerCase();
     const matches = listingsWithDistance.filter((l) => textRelevance(l, lower) > 0);
 
+    // Always resolve OLA suggestions too, local match or not — same
+    // one-call-per-execute pipeline as the debounce effect above, and the
+    // same reason: local matches and external suggestions are independent
+    // answers that must not suppress each other (e.g. "dosa" should still
+    // offer a real "Dosa Point" suggestion even though it already matches
+    // existing listings). `results` is kept in `placeResults` so a genuine
+    // suggestion is never thrown away — but *executing* a search (Enter/
+    // the icon/a dropdown pick) is a deliberate "run this now" action, and
+    // the map is about to move to show the answer, so the dropdown itself
+    // always closes here regardless of what was found — leaving it open
+    // would mean stale suggestions still hanging below the search bar
+    // after the camera has already moved on. Refocusing the input (see its
+    // onFocus handler) still reopens whatever's in `placeResults`, so
+    // nothing found here is actually lost, just not left open uninvited.
+    const near = userLocation ?? BENGALURU_CENTER;
+    const { center, nearby, placeResults: results } = await resolveAreaMatches(trimmed, near);
+    setPlaceResults(results);
+    setSearchResultsOpen(false);
+    // Enter/the icon clears the debounce timer above, so if a debounce was
+    // still pending for this same query, its own `setSearching(false)`
+    // (inside its setTimeout callback) will now never run — this call is
+    // what stops `searching` getting stuck true after an Enter that beat
+    // the debounce to it.
+    setSearching(false);
+
     if (matches.length > 0) {
+      // A real local match still wins the camera focus outright — see
+      // textMatches/filtered above for why text matches always take
+      // priority over geographic resolution for the listing list itself.
       setAreaListings([]);
       setAreaCenter(null);
-      setPlaceResults([]);
-      setSearchResultsOpen(false);
       setSearchPin(null);
       focusMapOn(matches.map((l) => ({ lat: l.latitude, lng: l.longitude })));
       return;
     }
 
-    const near = userLocation ?? BENGALURU_CENTER;
-    const { center, nearby, placeResults: results } = await resolveAreaMatches(trimmed, near);
     setAreaCenter(center);
     setAreaListings(nearby);
-    // Nearby Beggars Map listings and OLA's own suggestions are independent
-    // answers, never mutually suppressed — a query can have both, and
-    // neither should hide the other just because the other happens to
-    // exist (see resolveAreaMatches above). `results` is kept in
-    // `placeResults` so a genuine suggestion is never thrown away — but
-    // *executing* a search (Enter/the icon) is a deliberate "run this now"
-    // action, and the map has already moved to show the answer, so the
-    // dropdown itself always closes here regardless of what was found —
-    // leaving it open would mean stale suggestions still hanging below the
-    // search bar after the camera has already moved on. Refocusing the
-    // input (see its onFocus handler) still reopens whatever's in
-    // `placeResults`, so nothing found here is actually lost, just not
-    // left open uninvited.
-    setPlaceResults(results);
-    setSearchResultsOpen(false);
     if (nearby.length > 0) {
       setSearchPin(null);
       focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
     } else if (center) {
-      // Nothing of ours nearby — move the map to the resolved place anyway
-      // so the search visibly goes somewhere even with nothing on the map
-      // yet, instead of silently doing nothing.
+      // Nothing of ours nearby — a genuinely novel place. Pin it (the same
+      // way selectSearchResult below already does for a dropdown pick) so
+      // there's a visible marker at the exact resolved coordinate, not
+      // just a camera move with nothing to look at — this was the missing
+      // half of the fix; the camera already moved here before, but nothing
+      // ever showed a pin. addSearchedPlace reads this same `center` value
+      // via `areaCenter`, so the pin and Add Listing's initial location
+      // always agree on the identical coordinate.
+      setSearchPin({ lat: center.lat, lng: center.lon });
       focusMapOn([{ lat: center.lat, lng: center.lon }]);
+    } else {
+      // Nothing resolved at all — clear any pin left over from a previous,
+      // different search rather than letting it linger on-screen.
+      setSearchPin(null);
     }
   }
 
@@ -939,6 +1012,26 @@ export default function App() {
       return;
     }
     setAddInitialCoords({ lat: searchPin.lat, lon: searchPin.lng });
+    setShowAdd(true);
+    setSearchPin(null);
+  }
+
+  // The "No listings match your search, want to add it to the map?" empty
+  // state's own add button — distinct from confirmAddThisPlace above, which
+  // requires the user to have explicitly picked a dropdown suggestion first
+  // (searchPin only gets set by that pick). This one fires straight from
+  // the empty-list message, so it carries whatever `areaCenter` the search
+  // itself already resolved (see resolveAreaMatches) — the same location
+  // this exact query would otherwise show as a suggestion for. Without
+  // this, a user who searched "Juicy Spot", saw no local match, and clicked
+  // straight through this message (instead of first opening the dropdown
+  // and picking the suggestion) had to re-enter the location by hand in
+  // the modal that opens. `areaCenter` is null when nothing resolved (e.g.
+  // a genuinely unknown query) — the modal just opens with no pre-filled
+  // location then, same as before this fix, and the user can still set a
+  // location manually either way.
+  function addSearchedPlace() {
+    if (areaCenter) setAddInitialCoords({ lat: areaCenter.lat, lon: areaCenter.lon });
     setShowAdd(true);
     setSearchPin(null);
   }
@@ -1198,10 +1291,20 @@ export default function App() {
                 {!loading && !loadError && filtered.length === 0 ? (
                   listings.length === 0 ? (
                     <p className="loading-text">No listings yet. Be the first to add one.</p>
+                  ) : searching ? (
+                    // The real answer isn't in yet — areaListings/areaCenter
+                    // were already reset for the new query, but the debounced
+                    // OLA resolution is still pending/in flight (see
+                    // `searching` above). Showing the "no match" message here
+                    // would be premature: it used to render (with a clickable
+                    // "add it to the map") during this exact window, and
+                    // clicking it opened Add Listing with no location because
+                    // areaCenter genuinely hadn't resolved yet.
+                    <p className="loading-text">Searching…</p>
                   ) : !pickingLocation ? (
                     <p className="loading-text">
                       No listings match your search, want to{' '}
-                      <button className="text-button-inline" onClick={() => setShowAdd(true)}>
+                      <button className="text-button-inline" onClick={addSearchedPlace}>
                         add it to the map
                       </button>
                       ?

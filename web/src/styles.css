@@ -128,13 +128,15 @@ body {
 }
 
 /* City selector, text input and search icon combined into one pill so they
-   read as a single search bar rather than three separate controls. Sized as
-   the map overlay's dominant, most prominent element — substantially larger
-   than a typical toolbar input — while staying capped so it can't crowd out
-   the Add button on the same row. */
+   read as a single search bar rather than three separate controls. Width
+   comes from --search-bar-w (set on .map-frame above) rather than a flat
+   percentage of the row, so it stays a reasonably-sized control instead of
+   ballooning to cover most of the map on a wide desktop viewport, while
+   still leaving the Add button its own room via the row's own
+   justify-content: space-between. */
 .search-bar {
-  flex: 0 1 520px;
-  max-width: 68%;
+  flex: 0 1 auto;
+  width: var(--search-bar-w);
   display: flex;
   align-items: center;
   background: #fff;
@@ -236,11 +238,18 @@ body {
   pointer-events: none;
 }
 
+/* Matches .search-bar's own width (--search-bar-w, set on .map-frame) so
+   the dropdown can never spill wider than the search bar it belongs to —
+   it used to stretch to the row's own right edge (right: 14px) regardless
+   of the search bar's actual width, which on desktop meant it visibly
+   extended past the search bar toward the Add button. Mobile breakpoints
+   below override this back to right: 14px, matching .search-bar's own
+   full-row-width there. */
 .map-search-results {
   position: absolute;
   top: 50px;
   left: 14px;
-  right: 14px;
+  width: var(--search-bar-w);
   z-index: 5;
   background: #fff;
   border-radius: 10px;
@@ -365,6 +374,16 @@ body {
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  /* Single source of truth for the search bar's own width, read by both
+     .search-bar and .map-search-results below so the suggestion dropdown
+     can never render wider than the search bar it belongs to. clamp()
+     keeps this one responsive value across the whole desktop/tablet range
+     instead of a flat percentage that balloons on a wide monitor (68% of a
+     1600px-wide map area was ~1000px, covering most of the map) — no
+     separate hardcoded breakpoint needed for "wide desktop" vs "narrow
+     desktop". Mobile breakpoints below override this locally, since the
+     search bar is meant to be full-row-width there, not capped. */
+  --search-bar-w: clamp(260px, 32vw, 440px);
 }
 
 .map-click-hint {
@@ -1802,21 +1821,47 @@ body {
   .map-panel {
     padding: 10px;
   }
-  /* The search bar's desktop-tuned `max-width: 68%` (in .search-bar
-     itself) was crushing the input to a sliver of its already-narrow
-     mobile row, and the row still wrapped the Add button onto a second
-     line where it floated loose over the map with no room around it.
-     Un-capping the search bar and keeping the row on one line (its own
-     flex layout — search-bar flex:1, Add button auto width — already fits
-     both at 375px+) fixes both at once. */
+  /* The desktop/tablet .search-bar width (--search-bar-w, a clamp() capped
+     well under full width) was crushing the input to a sliver of its
+     already-narrow mobile row, and the row still wrapped the Add button
+     onto a second line where it floated loose over the map with no room
+     around it. Fixed by giving it an explicit width instead: keeping the
+     row on one line (search bar + Add button, already fits both at
+     375px+) but as a *definite* pixel formula rather than "grow to fill
+     whatever's left" (the previous `flex: 1 1 auto; width: auto` did this
+     via flex-grow) — that indefinite sizing is exactly what the dropdown
+     below couldn't mirror: it doesn't share this row, so it had no way to
+     know how much space the Add button was actually eating on it, and
+     rendering to the row's own full width made it visibly wider than the
+     search bar it belongs to. 124px is the measured, fixed (not
+     viewport-scaled) footprint of everything else on this row at this
+     breakpoint — Add's own width, the row's gap, and the row/frame/panel
+     edge insets on both sides — confirmed empirically constant across
+     multiple widths, so `calc(100vw - 124px)` reproduces the exact same
+     box the old flex-grow approach did, just as a value the dropdown
+     below can copy exactly. (Portrait restores full width again below,
+     since Add moves to its own row there — see the portrait-only block.) */
   .map-overlay-row {
     flex-wrap: nowrap;
   }
   .search-bar {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    width: calc(100vw - 124px);
     max-width: none;
     min-width: 0;
     border-radius: 12px;
+  }
+  /* Exactly mirrors .search-bar's own width formula immediately above —
+     this used to independently span the row's full width (right: 14px),
+     which on this shared (non-portrait) row is wider than the search bar
+     actually is once the Add button's own space is accounted for, so the
+     dropdown visibly overlapped/overhung the search bar's right edge.
+     Sharing the identical calc() here (not an independent percentage or
+     "fill to the row edge") is what guarantees these two elements can
+     never drift apart again. */
+  .map-search-results {
+    right: auto;
+    width: calc(100vw - 124px);
   }
   /* Still noticeably larger than the pre-redesign 13px/8px pill, but not
      the full desktop bump — the desktop 14px/15px sizing would eat too much
@@ -1899,13 +1944,26 @@ body {
   .map-overlay-row .map-picking-cancel {
     align-self: flex-end;
   }
+  /* The shared phone rule above gives .search-bar a fixed width that
+     leaves room for the Add button *sharing its row* — but here Add is on
+     its own row (see .map-overlay-row above), so the search bar should
+     fill the full row width again, not leave that same gap unnecessarily.
+     50px is the fixed (non-viewport-scaled) left+right edge inset at this
+     breakpoint — confirmed empirically constant across widths, same
+     approach as the shared rule's own 124px. */
+  .search-bar {
+    width: calc(100vw - 50px);
+  }
   /* Static (not JS-measured, see sidePanelTop's effect skipping portrait)
      — the search-results dropdown's own top offset was tuned for the old
      single-row overlay; the second (Add button) row now pushes the row's
      real bottom further down, so this needs a matching bump to keep the
-     dropdown from opening underneath/overlapping that row. */
+     dropdown from opening underneath/overlapping that row. Width mirrors
+     .search-bar's own formula immediately above, for the same reason the
+     shared rule's dropdown override does. */
   .map-search-results {
     top: 108px;
+    width: calc(100vw - 50px);
   }
   /* Draggable bottom sheet — height is driven by the `--sheet-h` custom
      property (set inline on .map-frame from App.tsx's sheetState/drag
@@ -2061,18 +2119,38 @@ body {
   .map-panel {
     padding: 6px;
   }
-  /* The shared phone rule above (.search-bar { flex: 1 1 auto; max-width:
-     none }) is what portrait needs — full width, since it's the only thing
-     on its row — but landscape has plenty of side-by-side room, and without
-     its own cap here the search bar was stretching to fill nearly the
-     entire row, squeezing "+ Add" down to a sliver on the right. Capping
-     the basis/max-width here (in addition to the font/padding reduction
-     below, which only shrank the *contents*, not the container) is what
-     actually makes the bar shorter, leaving real gap before the Add
-     button via the row's existing `justify-content: space-between`. */
+  /* The shared phone rule above (.search-bar { flex: 0 1 auto; width:
+     calc(100vw - 124px) }) is sized for that breakpoint's own edge insets
+     and Add-button footprint — landscape has plenty of side-by-side room,
+     but without its own cap here the search bar was stretching too wide,
+     squeezing "+ Add" down to a sliver on the right. Capping it here (in
+     addition to the font/padding reduction below, which only shrank the
+     *contents*, not the container) is what actually makes the bar
+     shorter, leaving real gap before the Add button via the row's
+     existing `justify-content: space-between`.
+     `width: min(320px, calc(55vw - 23px))` replaces what used to be
+     `flex: 0 1 320px; max-width: 55%` — a bare `%` on a flex item resolves
+     against the *flex container's* content box (.map-overlay-row, which is
+     narrower than .map-frame by this row's own edge insets), which is a
+     different reference than the plain absolutely-positioned dropdown
+     below can use for its own width — the two independently-computed
+     values quietly drifted apart by a measurable amount on narrower
+     landscape widths (confirmed: 15px at 480px wide), enough to visibly
+     overhang. calc(55vw - 23px) reproduces the exact same 55%-of-row
+     result (23px is this row's own fixed edge-inset contribution, same
+     idea as the shared rule's 124px) but expressed in viewport-relative
+     terms, which both this and the dropdown below can share byte-for-byte
+     with no drift possible. */
   .search-bar {
-    flex: 0 1 320px;
-    max-width: 55%;
+    flex: 0 1 auto;
+    width: min(320px, calc(55vw - 23px));
+  }
+  /* Exactly mirrors .search-bar's own width formula immediately above —
+     see that comment for why this replaced an independently-computed
+     `min(320px, 55%)` that could drift out of sync with the search bar. */
+  .map-search-results {
+    right: auto;
+    width: min(320px, calc(55vw - 23px));
   }
   /* Landscape's search bar reclaims more vertical space than the shared
      phone sizing above already gives up — smaller still, but "Bengaluru"
