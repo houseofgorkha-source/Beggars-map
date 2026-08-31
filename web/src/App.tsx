@@ -492,29 +492,30 @@ export default function App() {
       // regardless of whether a local text match also exists.
       setPlaceResults(results);
       setSearchResultsOpen(results.length > 0);
-      // A genuinely novel place — no local text match, and nothing of ours
-      // nearby the resolved center either — is exactly the "No listings
-      // match your search, want to add it to the map?" empty state (see
-      // filtered above). That state used to leave the map camera and
-      // searchPin completely untouched, so a user had no visual indication
-      // of *where* the searched place actually is — confirmed live:
-      // searching "Tandoori Taal - Palace Road" showed the empty-state
-      // message with the map still sitting at its default view and no pin
-      // anywhere. This is the one live-typing exception to "camera
-      // movement stays reserved for an explicit search" (see this effect's
-      // own doc comment above) — scoped exactly to the condition that
-      // produces that empty state, so an ordinary query that already has a
-      // local or nearby match still can't jump the view around mid-
-      // keystroke. `searchPin` is also this effect's one authoritative
-      // source for it — cleared whenever this condition no longer holds
-      // (a local match now matches, nearby listings turned up, or nothing
-      // resolved at all) so a stale pin from an earlier, different query
-      // can never linger. `addSearchedPlace` (below) reads this same
-      // `center` value via `areaCenter`, so the pin and Add Listing's
-      // initial location always agree.
-      if (textMatches.length === 0 && nearby.length === 0 && center) {
+      // Any resolved OLA place gets a pin + camera focus at its own exact
+      // coordinate, as long as no local text match already won outright —
+      // regardless of whether Beggars Map listings also happen to exist
+      // within AREA_MATCH_RADIUS_KM of it. `nearby.length === 0` used to be
+      // required here too, which silently regressed as the listing set grew:
+      // "Tandoori Taal - Palace Road" resolves correctly and reliably
+      // (bestPlaceMatch picks the right OLA candidate every time — confirmed
+      // live), but as soon as any unrelated listing landed within 3km of it,
+      // this condition went false and the pin/camera-focus for that
+      // correctly-resolved place silently stopped appearing — with no code
+      // change involved, just more production listings accumulating nearby.
+      // Nearby Beggars Map listings and a resolved OLA place are independent
+      // answers, same principle as `placeResults` above (see its own
+      // comment) — one must never suppress the other, and that now applies
+      // to the pin/camera layer too, not just the suggestion dropdown.
+      // `searchPin` stays this effect's one authoritative source for it —
+      // cleared whenever a local match wins or nothing resolves, so a stale
+      // pin from an earlier, different query can never linger.
+      // `addSearchedPlace` (below) reads this same `center` value via
+      // `areaCenter`, so the pin and Add Listing's initial location always
+      // agree on the identical coordinate.
+      if (textMatches.length === 0 && center) {
         setSearchPin({ lat: center.lat, lng: center.lon });
-        focusMapOn([{ lat: center.lat, lng: center.lon }]);
+        focusMapOn([...nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })), { lat: center.lat, lng: center.lon }]);
       } else {
         setSearchPin(null);
       }
@@ -772,20 +773,23 @@ export default function App() {
 
     setAreaCenter(center);
     setAreaListings(nearby);
-    if (nearby.length > 0) {
-      setSearchPin(null);
-      focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
-    } else if (center) {
-      // Nothing of ours nearby — a genuinely novel place. Pin it (the same
-      // way selectSearchResult below already does for a dropdown pick) so
-      // there's a visible marker at the exact resolved coordinate, not
-      // just a camera move with nothing to look at — this was the missing
-      // half of the fix; the camera already moved here before, but nothing
-      // ever showed a pin. addSearchedPlace reads this same `center` value
+    if (center) {
+      // The resolved place always gets a pin + camera focus at its own
+      // exact coordinate, whether or not Beggars Map listings also happen
+      // to exist within AREA_MATCH_RADIUS_KM of it — nearby listings are an
+      // independent answer shown alongside it (both fit into the same
+      // camera bounds below), never a reason to suppress it. This used to
+      // require `nearby.length === 0`, which silently regressed as the
+      // listing set grew: a query like "Tandoori Taal - Palace Road"
+      // resolves to the exact same correct coordinate every time
+      // (bestPlaceMatch — confirmed live), but as soon as any unrelated
+      // listing landed within 3km of it, the pin/camera-focus for that
+      // correctly-resolved place stopped appearing, with no code change
+      // involved. addSearchedPlace (below) reads this same `center` value
       // via `areaCenter`, so the pin and Add Listing's initial location
       // always agree on the identical coordinate.
       setSearchPin({ lat: center.lat, lng: center.lon });
-      focusMapOn([{ lat: center.lat, lng: center.lon }]);
+      focusMapOn([...nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })), { lat: center.lat, lng: center.lon }]);
     } else {
       // Nothing resolved at all — clear any pin left over from a previous,
       // different search rather than letting it linger on-screen.
@@ -807,15 +811,13 @@ export default function App() {
     const nearby = listingsWithDistance.filter((l) => distanceKm(center.lat, center.lon, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM);
     setAreaCenter(center);
     setAreaListings(nearby);
-    if (nearby.length > 0) {
-      setSearchPin(null);
-      focusMapOn(nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })));
-    } else {
-      // Nothing of ours at the picked place — offer the usual "add this
-      // place" pin instead of leaving the user with only a moved camera.
-      setSearchPin({ lat: place.latitude, lng: place.longitude });
-      focusMapOn([{ lat: place.latitude, lng: place.longitude }]);
-    }
+    // The picked place always gets a pin + camera focus at its own exact
+    // coordinate, same fix and same reasoning as executeSearch/the debounce
+    // effect above — nearby Beggars Map listings are shown alongside it in
+    // the same camera bounds, never a reason to suppress the picked place's
+    // own pin.
+    setSearchPin({ lat: place.latitude, lng: place.longitude });
+    focusMapOn([...nearby.map((l) => ({ lat: l.latitude, lng: l.longitude })), { lat: place.latitude, lng: place.longitude }]);
   }
 
   // The one place that fully backs out of an active search without
