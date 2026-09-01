@@ -1,70 +1,68 @@
-import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import MapScreen from '../screens/MapScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import AboutScreen from '../screens/AboutScreen';
 import ListingDetailScreen from '../screens/ListingDetailScreen';
 import AddListingScreen from '../screens/AddListingScreen';
 import PickLocationScreen from '../screens/PickLocationScreen';
 import SignInScreen from '../screens/SignInScreen';
 import LegalScreen from '../screens/LegalScreen';
-import { useAuth } from '../lib/auth';
 import type { RootStackParamList, TabParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
-// Normally not rendered at all — the Contribute tab's press is intercepted
-// and redirected to the AddListing/SignIn screen on the root stack instead.
-// It only actually renders (briefly) when the initial session fetch is still
-// in flight, so it can wait for `loading` to resolve before deciding where
-// to send the user instead of guessing "no session yet" as "signed out".
-function ContributeRedirect() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { session, loading } = useAuth();
-
-  useEffect(() => {
-    if (loading) return;
-    navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()?.navigate(session ? 'AddListing' : 'SignIn');
-  }, [navigation, session, loading]);
-
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator />
-    </View>
-  );
-}
-
+// Contribute is no longer a tab — "+ Add" now lives directly on MapScreen
+// (matching the current web product) and navigates straight to
+// AddListing/SignIn on the root stack, the same way this redirect used to.
+// Map and Profile are the only two primary destinations now; Leaderboard and
+// About moved to secondary screens on the root stack, reachable from Profile
+// (and, for About, from the Map header too).
 function Tabs() {
-  const { session, loading } = useAuth();
-
   return (
-    <Tab.Navigator screenOptions={{ headerShown: true }}>
-      <Tab.Screen name="Map" component={MapScreen} options={{ headerShown: false }} />
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: true,
+        tabBarActiveTintColor: '#ec4899',
+        tabBarInactiveTintColor: '#999',
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+        tabBarStyle: {
+          backgroundColor: '#fff',
+          borderTopWidth: 1,
+          borderTopColor: '#eee',
+          height: 58,
+          paddingTop: 6,
+          shadowColor: '#000',
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: -2 },
+          elevation: 8,
+        },
+      }}
+    >
       <Tab.Screen
-        name="Contribute"
-        component={ContributeRedirect}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            if (loading) {
-              // Session status isn't known yet — let the tab switch happen
-              // normally so ContributeRedirect can wait it out and redirect
-              // once it resolves, instead of guessing "signed out" here.
-              return;
-            }
-            e.preventDefault();
-            navigation.getParent<NativeStackNavigationProp<RootStackParamList>>()?.navigate(
-              session ? 'AddListing' : 'SignIn'
-            );
-          },
-        })}
+        name="Map"
+        component={MapScreen}
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'map' : 'map-outline'} color={color} size={size} />
+          ),
+        }}
       />
-      <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} color={color} size={size} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }
@@ -95,6 +93,8 @@ export default function RootNavigator() {
           component={LegalScreen}
           options={{ title: 'Legal', presentation: 'modal' }}
         />
+        <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: 'Leaderboard' }} />
+        <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About Us' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

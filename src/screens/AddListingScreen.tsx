@@ -121,7 +121,7 @@ export default function AddListingScreen() {
     }
     const foodCheck = checkFoodRelevance(name, note);
     if (!foodCheck.ok) {
-      Alert.alert('Food listings only', `Beggars Map is for cheap eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
+      Alert.alert('Food listings only', `Beggars Map is for affordable eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
       return;
     }
 

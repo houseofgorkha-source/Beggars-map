@@ -9,61 +9,25 @@ import type { Listing } from '../types/database';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-function AboutSection() {
-  return (
-    <View style={styles.about}>
-      <Text style={styles.aboutTitle}>About Us</Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Great food, ₹100 or less.</Text>
-        {'\n'}A map of Bengaluru’s most affordable eats, built by the people who eat there.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Tastiest. Healthiest. Best value for money.</Text>
-        {'\n'}Affordable shouldn’t mean settling for less.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>One rule: ₹100.</Text>
-        {'\n'}If it costs more, it doesn’t go on the map.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Nothing here is for sale.</Text>
-        {'\n'}No ads. No promoted spots. No paying your way to the top.
-      </Text>
-
-      <Text style={styles.aboutTitle}>A Message to Our Community</Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>This map runs on you.</Text>
-        {'\n'}Every listing came from someone who took a minute to add it.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Tastiest? Healthiest? Best value for money? Under ₹100?</Text>
-        {'\n'}Then it belongs on the map. <Text style={styles.aboutBold}>Add it.</Text>
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Found a ₹60 breakfast? An ₹80 thali?</Text>
-        {'\n'}Put it on the map. It takes a minute.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>Prices change. Places close.</Text>
-        {'\n'}If something is out of date, fix it. That’s what keeps this useful for everyone.
-      </Text>
-      <Text style={styles.aboutBody}>
-        <Text style={styles.aboutBold}>You don’t need to be a critic.</Text>
-        {'\n'}Just know good value when you find it.
-      </Text>
-
-      <Text style={styles.aboutTagline}>Found by the community. Kept true by the community.</Text>
-      <Text style={styles.comingSoon}>Launching soon in Delhi, Mumbai, Kolkata, Chennai, Guwahati and more</Text>
-    </View>
-  );
-}
-
 function StoreRow() {
   return (
     <View style={styles.contactRow}>
       <Text style={styles.storeText}>App Store: Coming soon</Text>
       <Text style={styles.storeText}>Play Store: Coming soon</Text>
     </View>
+  );
+}
+
+// Leaderboard/About/Legal are all reached from here now — none of them are
+// primary tabs anymore (see RootNavigator). This mirrors web's own
+// About-reachable-from-more-than-one-place pattern rather than being a
+// duplication to avoid.
+function MenuRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable style={styles.menuRow} onPress={onPress}>
+      <Text style={styles.menuRowText}>{label}</Text>
+      <Text style={styles.menuRowChevron}>›</Text>
+    </Pressable>
   );
 }
 
@@ -131,11 +95,14 @@ export default function ProfileScreen() {
             <Pressable style={styles.signInButton} onPress={() => navigation.navigate('SignIn')}>
               <Text style={styles.signInButtonText}>Sign in</Text>
             </Pressable>
-            <Pressable style={styles.legalButton} onPress={() => navigation.navigate('Legal')}>
-              <Text style={styles.legalButtonText}>Privacy Policy & Terms</Text>
-            </Pressable>
+
+            <View style={styles.menuSection}>
+              <MenuRow label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} />
+              <MenuRow label="About Us" onPress={() => navigation.navigate('About')} />
+              <MenuRow label="Privacy Policy & Terms" onPress={() => navigation.navigate('Legal')} />
+            </View>
+
             <StoreRow />
-            <AboutSection />
           </View>
         }
       />
@@ -144,26 +111,18 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.name}>{profile?.display_name ?? 'Contributor'}</Text>
-        <Text style={styles.rank}>{rank ? `Rank #${rank}` : 'Not ranked yet'}</Text>
-        <Pressable style={styles.signOutButton} onPress={signOut}>
-          <Text style={styles.signOutText}>Sign out</Text>
-        </Pressable>
-        <Pressable style={styles.deleteAccountButton} onPress={confirmDeleteAccount} disabled={deleting}>
-          <Text style={styles.deleteAccountText}>{deleting ? 'Deleting…' : 'Delete my account'}</Text>
-        </Pressable>
-        <Pressable onPress={() => navigation.navigate('Legal')}>
-          <Text style={styles.legalLink}>Privacy Policy & Terms</Text>
-        </Pressable>
-        <StoreRow />
-      </View>
-
-      <Text style={styles.sectionTitle}>My listings ({myListings.length})</Text>
       <FlatList
         data={myListings}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <>
+            <View style={styles.accountBlock}>
+              <Text style={styles.name}>{profile?.display_name ?? 'Contributor'}</Text>
+            </View>
+            <Text style={styles.sectionTitle}>My listings ({myListings.length})</Text>
+          </>
+        }
         ListEmptyComponent={<Text style={styles.empty}>You haven't posted anything yet.</Text>}
         renderItem={({ item }) => (
           <Pressable
@@ -174,7 +133,26 @@ export default function ProfileScreen() {
             <Text style={styles.cardPrice}>₹{item.price_rupees}</Text>
           </Pressable>
         )}
-        ListFooterComponent={<AboutSection />}
+        ListFooterComponent={
+          <>
+            <Text style={styles.rank}>{rank ? `Rank #${rank}` : 'Not ranked yet'}</Text>
+
+            <View style={styles.menuSection}>
+              <MenuRow label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} />
+              <MenuRow label="About Us" onPress={() => navigation.navigate('About')} />
+              <MenuRow label="Privacy Policy & Terms" onPress={() => navigation.navigate('Legal')} />
+            </View>
+
+            <Pressable style={styles.deleteAccountButton} onPress={confirmDeleteAccount} disabled={deleting}>
+              <Text style={styles.deleteAccountText}>{deleting ? 'Deleting…' : 'Delete my account'}</Text>
+            </Pressable>
+            <Pressable style={styles.signOutButton} onPress={signOut}>
+              <Text style={styles.signOutText}>Sign out</Text>
+            </Pressable>
+
+            <StoreRow />
+          </>
+        }
       />
     </View>
   );
@@ -186,19 +164,35 @@ const styles = StyleSheet.create({
   signedOutTitle: { fontSize: 16, color: '#555', marginBottom: 16 },
   signInButton: { backgroundColor: '#ec4899', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 24 },
   signInButtonText: { color: '#fff', fontWeight: '700' },
-  legalButton: { marginTop: 16 },
-  legalButtonText: { color: '#888', fontSize: 13, textDecorationLine: 'underline' },
-  header: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  accountBlock: { padding: 16, paddingBottom: 4 },
   name: { fontSize: 20, fontWeight: '700' },
-  rank: { color: '#ec4899', fontWeight: '600', marginTop: 4 },
-  signOutButton: { marginTop: 12, alignSelf: 'flex-start' },
+  rank: { color: '#ec4899', fontWeight: '600', paddingHorizontal: 16, marginTop: 20 },
+  menuSection: {
+    marginTop: 12,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f2f2f2',
+  },
+  menuRowText: { fontSize: 15, fontWeight: '600', color: '#222' },
+  menuRowChevron: { color: '#bbb', fontSize: 18 },
+  signOutButton: { marginTop: 16, marginHorizontal: 16, alignSelf: 'flex-start' },
   signOutText: { color: '#a33' },
-  deleteAccountButton: { marginTop: 12, alignSelf: 'flex-start' },
+  deleteAccountButton: { marginTop: 20, marginHorizontal: 16, alignSelf: 'flex-start' },
   deleteAccountText: { color: '#a33', fontSize: 13, textDecorationLine: 'underline' },
-  legalLink: { color: '#888', fontSize: 13, textDecorationLine: 'underline', marginTop: 10 },
   sectionTitle: { fontSize: 15, fontWeight: '700', margin: 16, marginBottom: 8 },
-  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
-  empty: { color: '#888' },
+  listContent: { paddingBottom: 24 },
+  empty: { color: '#888', marginHorizontal: 16 },
   card: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -206,27 +200,11 @@ const styles = StyleSheet.create({
     borderColor: '#eee',
     borderRadius: 10,
     padding: 12,
+    marginHorizontal: 16,
     marginBottom: 8,
   },
   cardTitle: { fontWeight: '600' },
   cardPrice: { fontWeight: '700', color: '#ec4899' },
-  contactRow: { flexDirection: 'row', gap: 16, marginTop: 12 },
+  contactRow: { flexDirection: 'row', gap: 16, marginTop: 20, marginHorizontal: 16, marginBottom: 8 },
   storeText: { color: '#888', fontWeight: '600', fontSize: 13 },
-  about: { padding: 24, alignItems: 'center' },
-  aboutTitle: { fontSize: 24, fontWeight: '900', marginBottom: 12, textAlign: 'center' },
-  aboutLead: { fontSize: 16, fontWeight: '600', lineHeight: 23, color: '#333', textAlign: 'center', marginBottom: 12 },
-  aboutBody: { fontSize: 14, lineHeight: 21, color: '#555', textAlign: 'center', marginBottom: 10 },
-  aboutBold: { color: '#0a0a0a', fontWeight: '700' },
-  aboutTagline: { fontSize: 15, fontWeight: '700', color: '#ec4899', textAlign: 'center', marginTop: 6, marginBottom: 4 },
-  comingSoon: {
-    marginTop: 8,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#ec4899',
-    backgroundColor: '#fce9f2',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    textAlign: 'center',
-  },
 });

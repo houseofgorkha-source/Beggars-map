@@ -49,6 +49,66 @@ export type PlaceSuggestion = {
   longitude: number;
 };
 
+function normalizePlaceText(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// OLA's autocomplete ranks predictions mostly by proximity to the bias
+// point, not by name relevance — confirmed on web (searching "Juicy Spot"
+// biased near Bengaluru center returned an unrelated street address as
+// prediction #1, with the actual restaurant only at #2). Same endpoint,
+// same behavior here, so re-rank by how closely each result's name matches
+// the typed query (sliding-window edit distance, so a longer name with a
+// trailing category suffix isn't unfairly penalized for length) and float
+// the best name match to the top. Results that don't clear a minimum
+// similarity bar keep OLA's own relative order at the end, rather than
+// forcing a guess on a genuinely ambiguous query.
+const MIN_NAME_MATCH_RATIO = 0.4;
+
+function nameMatchRatio(query: string, name: string): number {
+  const normalizedQuery = normalizePlaceText(query);
+  const candidate = normalizePlaceText(name);
+  if (!normalizedQuery || !candidate) return 0;
+
+  let distance: number;
+  if (candidate.length <= normalizedQuery.length) {
+    distance = levenshtein(normalizedQuery, candidate);
+  } else {
+    distance = Infinity;
+    for (let i = 0; i <= candidate.length - normalizedQuery.length; i++) {
+      distance = Math.min(distance, levenshtein(normalizedQuery, candidate.slice(i, i + normalizedQuery.length)));
+    }
+  }
+  return 1 - distance / normalizedQuery.length;
+}
+
+function rankByNameMatch(query: string, results: PlaceSuggestion[]): PlaceSuggestion[] {
+  return results
+    .map((result, index) => ({ result, index, ratio: nameMatchRatio(query, result.name) }))
+    .sort((a, b) => {
+      const aGood = a.ratio >= MIN_NAME_MATCH_RATIO;
+      const bGood = b.ratio >= MIN_NAME_MATCH_RATIO;
+      if (aGood !== bGood) return aGood ? -1 : 1;
+      if (aGood) return b.ratio - a.ratio || a.index - b.index;
+      return a.index - b.index; // neither clears the bar — keep OLA's own order
+    })
+    .map((scored) => scored.result);
+}
+
 export async function searchPlaces(query: string, near?: MapPoint): Promise<PlaceSuggestion[]> {
   if (!apiKey || !query.trim()) return [];
 
@@ -61,7 +121,7 @@ export async function searchPlaces(query: string, near?: MapPoint): Promise<Plac
   const data = await response.json();
   const predictions: any[] = data.predictions ?? [];
 
-  return predictions
+  const results = predictions
     .map((p) => ({
       placeId: p.place_id as string,
       name: (p.structured_formatting?.main_text ?? p.description ?? '') as string,
@@ -70,6 +130,8 @@ export async function searchPlaces(query: string, near?: MapPoint): Promise<Plac
       longitude: p.geometry?.location?.lng as number,
     }))
     .filter((p) => typeof p.latitude === 'number' && typeof p.longitude === 'number');
+
+  return rankByNameMatch(query, results);
 }
 
 export function boundsForPoints(points: MapPoint[]): [number, number, number, number] | null {

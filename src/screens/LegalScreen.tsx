@@ -75,7 +75,7 @@ export default function LegalScreen() {
         ) : (
           <>
             <Section title="What Beggars Map is">
-              {'A free, community-run directory of cheap eats (₹100 or under per plate/meal) in Bengaluru. Listings, prices, and reviews are submitted by users, not verified by us before they go live.'}
+              {'A free, community-run directory of affordable eats (₹100 or under per plate/meal) in Bengaluru. Listings, prices, and reviews are submitted by users, not verified by us before they go live.'}
             </Section>
             <Section title="No warranty on listings">
               {"A listed spot could be closed, its price could have changed, or its hygiene/quality is only as good as what other users have self-reported. Always use your own judgement — Beggars Map is a directory, not a guarantee."}

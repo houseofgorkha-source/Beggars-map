@@ -1,13 +1,29 @@
+import { supabase } from './supabase';
+
 export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: number; longitude: number } | null> {
   let url = rawUrl.trim();
   if (!url) return null;
 
-  // Short links (maps.app.goo.gl, goo.gl/maps/...) don't carry coordinates
-  // themselves — resolve the redirect first to get the real URL.
-  if (/goo\.gl/.test(url)) {
+  // Short links (maps.app.goo.gl, goo.gl/maps/..., share.google/...) don't
+  // carry coordinates themselves — resolved server-side via the same
+  // resolve-maps-link Edge Function web already uses (its own fetch isn't
+  // subject to the redirect-target restrictions a client fetch can hit).
+  // share.google links resolve to a plain google.com/search results page
+  // with no coordinates in the URL at all, so that function falls back to an
+  // OLA places text search for those and returns latitude/longitude
+  // directly instead of a finalUrl to run the regexes below on.
+  if (/goo\.gl/.test(url) || /(^|\/\/)share\.google\//.test(url)) {
     try {
-      const response = await fetch(url);
-      url = response.url || url;
+      const { data, error } = await supabase.functions.invoke<{ finalUrl?: string; latitude?: number; longitude?: number }>(
+        'resolve-maps-link',
+        { body: { url } }
+      );
+      if (error) return null;
+      if (typeof data?.latitude === 'number' && typeof data?.longitude === 'number') {
+        return { latitude: data.latitude, longitude: data.longitude };
+      }
+      if (!data?.finalUrl) return null;
+      url = data.finalUrl;
     } catch {
       return null;
     }
