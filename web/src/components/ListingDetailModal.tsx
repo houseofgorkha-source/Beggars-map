@@ -1,7 +1,8 @@
-import { forwardRef, useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { formatRelativeTime } from '../lib/relativeTime';
-import type { Listing } from '../types';
+import PhotoLightbox from './PhotoLightbox';
+import type { Listing, ListingPhoto } from '../types';
 
 type Props = {
   listingId: string;
@@ -62,6 +63,11 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   ref
 ) {
   const [listing, setListing] = useState<Listing | null>(null);
+  // Photos 2..n live in `listing_photos` (migration 0009); photo 1 is
+  // duplicated onto `listings.photo_url` so single-photo consumers keep
+  // working untouched. See `photos` below for how the two are merged.
+  const [extraPhotos, setExtraPhotos] = useState<ListingPhoto[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [voteCount, setVoteCount] = useState(0);
   const [hasVoted, setHasVoted] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -73,9 +79,10 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   async function load() {
     // None of these depend on each other's results, so run them concurrently
     // instead of one round-trip after another.
-    const [{ data: listingData, error: listingError }, { count }, userId] = await Promise.all([
+    const [{ data: listingData, error: listingError }, { count }, photoResult, userId] = await Promise.all([
       supabase.from('listings').select('*').eq('id', listingId).maybeSingle(),
       supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId),
+      supabase.from('listing_photos').select('*').eq('listing_id', listingId).order('position', { ascending: true }),
       ensureAnonymousSession(),
     ]);
 
@@ -90,6 +97,12 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     }
 
     setListing(listingData as Listing);
+    // Deliberately non-fatal: `listing_photos` is not present in every
+    // environment (it is missing from production as of this writing, where
+    // the request comes back as an error rather than an empty list). A
+    // listing that can't load its extra photos still shows its primary
+    // photo and everything else, exactly as it did before this existed.
+    setExtraPhotos((photoResult.error ? [] : (photoResult.data as ListingPhoto[] | null)) ?? []);
     setVoteCount(count ?? 0);
     setMyUserId(userId);
 
@@ -108,6 +121,27 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
+
+  // Every photo belonging to this listing, in display order: the primary
+  // `photo_url` first (so the existing "photo 1 is the cover" behaviour is
+  // unchanged), then the rest of `listing_photos`. Deduplicated by URL
+  // because photo 1 legitimately appears in BOTH places — AddListingModal
+  // and the Excel importer each write it to `photo_url` AND as position 0 —
+  // and without this the viewer would show the cover photo twice.
+  const photos = useMemo(() => {
+    const urls: string[] = [];
+    if (listing?.photo_url) urls.push(listing.photo_url);
+    for (const photo of extraPhotos) {
+      if (photo.photo_url && !urls.includes(photo.photo_url)) urls.push(photo.photo_url);
+    }
+    return urls;
+  }, [listing?.photo_url, extraPhotos]);
+
+  // A listing whose photos changed underneath an open viewer (or which had
+  // none to begin with) must not leave the viewer pointing at nothing.
+  useEffect(() => {
+    if (lightboxIndex !== null && lightboxIndex >= photos.length) setLightboxIndex(null);
+  }, [photos, lightboxIndex]);
 
   // The compact card's report reasons render as a small floating popover
   // (not an inline-expanding panel — that would grow the card and force the
@@ -222,7 +256,24 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     return (
       <div className="listing-cover listing-cover-compact" ref={ref}>
         <div className="compact-top">
-          {listing.photo_url ? <img src={listing.photo_url} alt="" className="compact-thumb" /> : null}
+          {photos.length ? (
+            <button
+              type="button"
+              className="compact-thumb-button"
+              // The compact card is hosted inside the map's marker popup;
+              // a click here must not bubble out to the map/marker handlers
+              // underneath it.
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxIndex(0);
+              }}
+              aria-label={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+              title={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+            >
+              <img src={photos[0]} alt="" className="compact-thumb" />
+              {photos.length > 1 ? <span className="photo-count-badge">{photos.length}</span> : null}
+            </button>
+          ) : null}
           <div className="compact-top-text">
             <div className="compact-title-row">
               <span className="compact-title">{listing.name}</span>
@@ -276,6 +327,15 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             ) : null}
           </div>
         </div>
+
+        {lightboxIndex !== null ? (
+          <PhotoLightbox
+            photos={photos}
+            startIndex={lightboxIndex}
+            listingName={listing.name}
+            onClose={() => setLightboxIndex(null)}
+          />
+        ) : null}
       </div>
     );
   }
@@ -288,7 +348,18 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
         </div>
 
         <div className="modal-body">
-          {listing.photo_url ? <img src={listing.photo_url} alt={listing.name} className="detail-photo" /> : null}
+          {photos.length ? (
+            <button
+              type="button"
+              className="detail-photo-button"
+              onClick={() => setLightboxIndex(0)}
+              aria-label={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+              title={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+            >
+              <img src={photos[0]} alt={listing.name} className="detail-photo" />
+              {photos.length > 1 ? <span className="photo-count-badge">{photos.length}</span> : null}
+            </button>
+          ) : null}
 
           <div className="detail-price-row">
             <span className="detail-price">₹{listing.price_rupees}</span>
@@ -323,6 +394,15 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             </div>
           ) : null}
         </div>
+
+        {lightboxIndex !== null ? (
+          <PhotoLightbox
+            photos={photos}
+            startIndex={lightboxIndex}
+            listingName={listing.name}
+            onClose={() => setLightboxIndex(null)}
+          />
+        ) : null}
     </div>
   );
 });

@@ -45,7 +45,23 @@ function applyKnown0011Workaround(container) {
 alter table listings add constraint listings_latitude_range_check check (latitude between -90 and 90);
 alter table listings add constraint listings_longitude_range_check check (longitude between -180 and 180);
 alter table listings add constraint listings_name_length_check check (char_length(name) <= 120);
-alter table listings add constraint listings_photo_url_bucket_check check (photo_url is null or photo_url like 'https://nvingzluboafxzxgxxwc.supabase.co/storage/v1/object/public/listing-photos/%');
+-- LOCAL-ONLY variant of 0011's photo_url bucket check. Production's own
+-- constraint (already applied directly to the hosted project) hard-codes
+-- that project's storage host, which is correct there and is NOT changed by
+-- anything in this file — this script has no --linked/--project-ref path.
+-- Replaying that exact definition into the local stack, though, makes every
+-- locally-uploaded photo unstorable: a local photo_url is
+-- http://127.0.0.1:54321/storage/... and can never match the hosted host,
+-- so the insert fails on a constraint that exists purely to keep production
+-- photos in production's own bucket. Same constraint name, same intent
+-- (photo_url must point at THIS environment's listing-photos bucket),
+-- widened only by the two local hosts the Supabase CLI serves storage on.
+alter table listings add constraint listings_photo_url_bucket_check check (
+  photo_url is null
+  or photo_url like 'https://nvingzluboafxzxgxxwc.supabase.co/storage/v1/object/public/listing-photos/%'
+  or photo_url like 'http://127.0.0.1:54321/storage/v1/object/public/listing-photos/%'
+  or photo_url like 'http://localhost:54321/storage/v1/object/public/listing-photos/%'
+);
 create or replace function public.lock_listing_is_hidden()
 returns trigger language plpgsql as $$
 begin

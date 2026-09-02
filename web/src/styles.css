@@ -793,6 +793,159 @@ body {
   background: #f2f2f2;
 }
 
+/* The thumbnail is now a button (it opens the photo viewer), but must keep
+   looking exactly like the plain <img> it replaced — so the button itself
+   is stripped of every default and just wraps the image at the same size. */
+.compact-thumb-button,
+.detail-photo-button {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.detail-photo-button {
+  width: 100%;
+}
+
+.compact-thumb-button:focus-visible,
+.detail-photo-button:focus-visible {
+  outline: 2px solid var(--pink-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Only rendered when a listing has more than one photo — the one hint that
+   there is something behind the cover image worth clicking. */
+.photo-count-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.detail-photo-button .photo-count-badge {
+  right: 8px;
+  bottom: 8px;
+  min-width: 20px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* Full-screen photo viewer. Portalled onto document.body (see
+   PhotoLightbox.tsx), so this z-index is compared against the page itself,
+   not against the map popup's own stacking context — nothing in the
+   existing 3-8 range documented in AGENTS.md changes because of it. */
+.photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  padding: 48px 16px;
+}
+
+.photo-lightbox-image {
+  max-width: min(1100px, 92vw);
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #111;
+  touch-action: pan-y;
+}
+
+.photo-lightbox-close,
+.photo-lightbox-nav {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.photo-lightbox-close:hover,
+.photo-lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.photo-lightbox-close {
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+}
+
+.photo-lightbox-nav {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  font-size: 30px;
+  padding-bottom: 4px;
+}
+
+.photo-lightbox-prev {
+  left: 14px;
+}
+
+.photo-lightbox-next {
+  right: 14px;
+}
+
+.photo-lightbox-counter {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Phones: the arrows would crowd a small photo, so drop them to the bottom
+   corners and let the swipe gesture carry most of the navigating. */
+@media (max-width: 720px) {
+  .photo-lightbox {
+    padding: 44px 8px 64px;
+  }
+
+  .photo-lightbox-nav {
+    top: auto;
+    bottom: 12px;
+    transform: none;
+    width: 38px;
+    height: 38px;
+  }
+
+  .photo-lightbox-counter {
+    bottom: 21px;
+  }
+}
+
 .compact-top-text {
   flex: 1;
   min-width: 0;
@@ -1249,11 +1402,14 @@ body {
   font-size: 12px;
 }
 
-/* Portrait-mobile only (shown in the portrait-only breakpoint below,
-   alongside .list-card-posted) — desktop/tablet/landscape keep their
-   existing look with just the vote count, per "do not change desktop." */
+/* Shown on every breakpoint. This was portrait-mobile-only (display:none
+   here, flipped to inline in the portrait breakpoint below) until distance
+   was asked for on desktop too. The value itself is still only ever
+   rendered when the listing actually has one — App.tsx leaves distanceKm
+   null when the browser gives us no location — so this rule can be
+   unconditional without ever showing an empty or invented distance. */
 .list-card-distance {
-  display: none;
+  display: inline;
   color: #888;
   font-size: 12px;
 }
@@ -2029,12 +2185,8 @@ body {
   .list-card-note {
     display: none;
   }
-  /* Distance was previously shown here (matching native mobile's own list)
-     — portrait-only, same as .list-card-posted below, so desktop/tablet/
-     landscape stay exactly as they were. */
-  .list-card-distance {
-    display: inline;
-  }
+  /* Distance is now shown at every breakpoint (see the base rule); the
+     portrait-only override that used to live here is gone as redundant. */
   /* These float relative to the *full* map height (their desktop `bottom`
      values), but the bottom sheet above now covers the bottom of that same
      map — without this they'd render underneath/behind the list cards

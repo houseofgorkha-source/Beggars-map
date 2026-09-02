@@ -43,6 +43,14 @@ supabase/.temp/
 # local DB backups (scripts/backup-local-db.mjs) — never intended for source control
 supabase/backups/
 
+# discovery pipeline (tools/discovery/) — dry-run/candidate output and API
+# call logs are local scratch data, never intended for source control
+tools/discovery/output/
+tools/discovery/*.log
+# source photos staged for import: input data (and third-party imagery),
+# not code — the importer reads them from disk, nothing needs them in git
+tools/discovery/photos/
+
 # generated native folders
 /ios
 /android

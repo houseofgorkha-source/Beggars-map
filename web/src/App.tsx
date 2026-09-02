@@ -1168,7 +1168,13 @@ export default function App() {
               onListingUpdated={load}
               hidePopup={pickingLocation}
               selectedDistanceKm={
-                isMobilePortrait ? listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null : null
+                // Shown on every breakpoint, not just mobile portrait. Still
+                // the SAME per-listing distance computed once in
+                // `listingsWithDistance` (lib/distance.ts) — no second
+                // calculation — and still null whenever `userLocation` is
+                // null, so a denied/unavailable location shows nothing
+                // rather than a fabricated number.
+                listingsWithDistance.find((l) => l.id === selectedListingId)?.distanceKm ?? null
               }
             />
 

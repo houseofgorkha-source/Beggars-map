@@ -36,7 +36,9 @@
     "web": "expo start --web",
     "db:backup": "node scripts/backup-local-db.mjs",
     "db:restore": "node scripts/restore-local-db.mjs",
-    "db:reset:safe": "node scripts/safe-reset-local-db.mjs"
+    "db:reset:safe": "node scripts/safe-reset-local-db.mjs",
+    "discover:dry-run": "node tools/discovery/discover.mjs",
+    "discover:import": "node tools/discovery/import-approved.mjs"
   },
   "private": true
 }
