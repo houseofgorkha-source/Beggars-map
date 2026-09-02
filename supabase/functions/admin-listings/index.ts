@@ -13,7 +13,15 @@
 //   npx supabase functions deploy admin-listings --project-ref nvingzluboafxzxgxxwc
 
 import { corsHeaders, json, verifyAdmin, requestMetadata, writeAuditLog } from '../_shared/adminAuth.ts';
-import { hideListing, unhideListing, archiveListing, unarchiveListing } from '../_shared/listingActions.ts';
+import {
+  hideListing,
+  unhideListing,
+  archiveListing,
+  unarchiveListing,
+  markListingReviewed,
+  markListingUnreviewed,
+} from '../_shared/listingActions.ts';
+import { applyListingFilters, ListingFilters } from '../_shared/listingFilters.ts';
 
 const ALLOWED_UPDATE_FIELDS = [
   'name',
@@ -30,17 +38,6 @@ type AllowedUpdateField = (typeof ALLOWED_UPDATE_FIELDS)[number];
 
 const VALID_VERIFICATION_STATUSES = ['unverified', 'pending_review', 'human_verified', 'rejected'];
 const VALID_SORT_COLUMNS = ['created_at', 'updated_at', 'price_rupees', 'name'];
-
-function escapeSearchTerm(term: string): string {
-  // `,` and `(`/`)` have structural meaning in PostgREST's `.or()` filter
-  // syntax — strip them rather than let a search term accidentally alter
-  // the shape of the filter. `%`/`_` are ILIKE wildcards — escape them so
-  // a literal percent sign in a search term is matched literally.
-  return term
-    .replace(/[,()]/g, ' ')
-    .replace(/[%_]/g, '\\$&')
-    .trim();
-}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -64,13 +61,8 @@ Deno.serve(async (req: Request) => {
     pageSize?: number;
     sortBy?: string;
     sortDir?: string;
-    filters?: {
-      source?: string;
-      verificationStatus?: string;
-      isHidden?: boolean;
-      archived?: boolean;
-      search?: string;
-    };
+    filters?: ListingFilters;
+    listingIds?: string[];
     fields?: Record<string, unknown>;
   };
   try {
@@ -85,20 +77,7 @@ Deno.serve(async (req: Request) => {
     const sortBy = VALID_SORT_COLUMNS.includes(body.sortBy ?? '') ? (body.sortBy as string) : 'created_at';
     const sortDir = body.sortDir === 'asc' ? 'asc' : 'desc';
 
-    let query = adminClient.from('listings').select('*', { count: 'exact' });
-
-    const f = body.filters ?? {};
-    if (f.source) query = query.eq('source', f.source);
-    if (f.verificationStatus) query = query.eq('verification_status', f.verificationStatus);
-    if (typeof f.isHidden === 'boolean') query = query.eq('is_hidden', f.isHidden);
-    if (typeof f.archived === 'boolean') {
-      query = f.archived ? query.not('archived_at', 'is', null) : query.is('archived_at', null);
-    }
-    if (f.search && f.search.trim()) {
-      const esc = escapeSearchTerm(f.search);
-      if (esc) query = query.or(`name.ilike.%${esc}%,note.ilike.%${esc}%,location_label.ilike.%${esc}%`);
-    }
-
+    let query = applyListingFilters(adminClient.from('listings').select('*', { count: 'exact' }), body.filters ?? {});
     query = query.order(sortBy, { ascending: sortDir === 'asc' }).range((page - 1) * pageSize, page * pageSize - 1);
 
     const { data, error, count } = await query;
@@ -186,14 +165,50 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, data: after });
   }
 
-  if (['hide', 'unhide', 'archive', 'unarchive'].includes(body.action ?? '')) {
+  if (['hide', 'unhide', 'archive', 'unarchive', 'markReviewed', 'markUnreviewed'].includes(body.action ?? '')) {
     if (!body.listingId) return json({ error: 'Missing listingId' }, 400);
-    const fn = { hide: hideListing, unhide: unhideListing, archive: archiveListing, unarchive: unarchiveListing }[
-      body.action as string
-    ]!;
+    const fn = {
+      hide: hideListing,
+      unhide: unhideListing,
+      archive: archiveListing,
+      unarchive: unarchiveListing,
+      markReviewed: markListingReviewed,
+      markUnreviewed: markListingUnreviewed,
+    }[body.action as string]!;
     const result = await fn(adminClient, body.listingId, adminEmail, meta);
     if (!result.ok) return json({ error: result.error }, result.status);
     return json({ success: true });
+  }
+
+  if (body.action === 'bulkMarkReviewed') {
+    // Two mutually exclusive modes:
+    //  - listingIds: an explicit set (the "selected" checkboxes case).
+    //  - filters: re-applied server-side against the FULL matching set,
+    //    ignoring pagination entirely — {} means "every listing". This is
+    //    what makes "mark all filtered" / "mark all new" correct even
+    //    when the result spans more pages than are currently rendered.
+    // Either way, only rows that are CURRENTLY unreviewed are touched and
+    // audited — re-marking an already-reviewed listing is a silent no-op,
+    // not a second audit entry, so clicking a bulk action twice is safe.
+    let query = adminClient.from('listings').select('id').is('reviewed_at', null);
+    if (Array.isArray(body.listingIds)) {
+      if (body.listingIds.length === 0) return json({ error: 'listingIds is empty' }, 400);
+      query = query.in('id', body.listingIds);
+    } else {
+      query = applyListingFilters(query, body.filters ?? {});
+    }
+
+    const { data: targets, error: targetsError } = await query;
+    if (targetsError) return json({ error: targetsError.message }, 500);
+
+    let updatedCount = 0;
+    for (const row of targets ?? []) {
+      const result = await markListingReviewed(adminClient, row.id, adminEmail, meta);
+      if (!result.ok) return json({ error: `Failed partway through (${updatedCount} succeeded): ${result.error}` }, result.status);
+      updatedCount += 1;
+    }
+
+    return json({ success: true, updatedCount });
   }
 
   return json({ error: 'Unknown action' }, 400);

@@ -3,20 +3,40 @@ import { adminApi, DashboardStats } from '../lib/adminApi';
 
 type Props = {
   onNavigateReports: () => void;
-  onNavigateListings: (filters: { isHidden?: boolean; archived?: boolean }) => void;
+  onNavigateListings: (filters: { isHidden?: boolean; archived?: boolean; reviewed?: boolean }) => void;
   onNavigateAudit: () => void;
 };
 
 export default function Dashboard({ onNavigateReports, onNavigateListings, onNavigateAudit }: Props) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autoReview, setAutoReview] = useState<boolean | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   useEffect(() => {
     adminApi
       .dashboardStats()
       .then((res) => setStats(res.data))
       .catch((err) => setError(err.message));
+    adminApi
+      .getSettings()
+      .then((res) => setAutoReview(res.data.import_default_reviewed === true))
+      .catch((err) => setSettingsError(err.message));
   }, []);
+
+  async function changeAutoReview(value: boolean) {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      await adminApi.updateSetting('import_default_reviewed', value);
+      setAutoReview(value);
+    } catch (err) {
+      setSettingsError((err as Error).message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   if (error) return <p className="admin-error">{error}</p>;
   if (!stats) return <p>Loading…</p>;
@@ -48,6 +68,44 @@ export default function Dashboard({ onNavigateReports, onNavigateListings, onNav
           <div className="admin-tile-value">{stats.archivedListings}</div>
           <div className="admin-tile-label">Archived listings</div>
         </button>
+        <button className="admin-tile admin-tile-clickable" onClick={() => onNavigateListings({ reviewed: false })}>
+          <div className="admin-tile-value">{stats.unreviewedListings}</div>
+          <div className="admin-tile-label">New / unreviewed</div>
+        </button>
+      </div>
+
+      <div className="admin-section">
+        <h2>Discovery import default</h2>
+        {settingsError ? <p className="admin-error">{settingsError}</p> : null}
+        {autoReview === null ? (
+          <p className="admin-muted">Loading…</p>
+        ) : (
+          <div className="admin-settings-radios">
+            <label>
+              <input
+                type="radio"
+                name="import-default-reviewed"
+                checked={!autoReview}
+                disabled={settingsSaving}
+                onChange={() => changeAutoReview(false)}
+              />
+              Always require review (default) — new imports show up as NEW until an admin reviews them
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="import-default-reviewed"
+                checked={autoReview}
+                disabled={settingsSaving}
+                onChange={() => changeAutoReview(true)}
+              />
+              Automatically mark imported listings as reviewed
+            </label>
+          </div>
+        )}
+        <p className="admin-muted admin-hint">
+          Applies only to future import runs — changing this never marks existing listings reviewed or unreviewed.
+        </p>
       </div>
 
       <div className="admin-section">

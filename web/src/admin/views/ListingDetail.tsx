@@ -91,7 +91,7 @@ export default function ListingDetail({ listingId, onBack }: Props) {
     }
   }
 
-  async function runAction(action: 'hide' | 'unhide' | 'archive' | 'unarchive') {
+  async function runAction(action: 'hide' | 'unhide' | 'archive' | 'unarchive' | 'markReviewed' | 'markUnreviewed') {
     setBusy(action);
     setError(null);
     setSaveMessage(null);
@@ -101,6 +101,8 @@ export default function ListingDetail({ listingId, onBack }: Props) {
         unhide: adminApi.listingsUnhide,
         archive: adminApi.listingsArchive,
         unarchive: adminApi.listingsUnarchive,
+        markReviewed: adminApi.listingsMarkReviewed,
+        markUnreviewed: adminApi.listingsMarkUnreviewed,
       }[action];
       await fn(listingId);
       load();
@@ -131,6 +133,7 @@ export default function ListingDetail({ listingId, onBack }: Props) {
           ← Back to listings
         </button>
         <div className="admin-badges">
+          {!listing.reviewed_at ? <span className="admin-badge admin-badge-new">NEW</span> : null}
           <span className={`admin-badge admin-badge-source-${listing.source}`}>{listing.source}</span>
           {listing.archived_at ? <span className="admin-badge admin-badge-archived">Archived</span> : null}
           {listing.is_hidden ? <span className="admin-badge admin-badge-hidden">Hidden</span> : null}
@@ -138,7 +141,10 @@ export default function ListingDetail({ listingId, onBack }: Props) {
         </div>
       </div>
 
-      <h2 className="admin-detail-title">{listing.name}</h2>
+      <h2 className="admin-detail-title">
+        {!listing.reviewed_at ? <span className="admin-new-dot" title="New — not yet reviewed" /> : null}
+        {listing.name}
+      </h2>
 
       {error ? <p className="admin-error">{error}</p> : null}
       {saveMessage ? <p className="admin-success">{saveMessage}</p> : null}
@@ -262,6 +268,12 @@ export default function ListingDetail({ listingId, onBack }: Props) {
             <dd>{new Date(listing.updated_at).toLocaleString()}</dd>
             <dt>Last modified by (admin)</dt>
             <dd>{listing.last_modified_by ?? '— (never edited by an admin)'}</dd>
+            <dt>Review status</dt>
+            <dd>
+              {listing.reviewed_at
+                ? `Reviewed ${new Date(listing.reviewed_at).toLocaleString()} by ${listing.reviewed_by ?? '—'}`
+                : 'Not yet reviewed'}
+            </dd>
           </dl>
 
           <h3>Moderation</h3>
@@ -290,10 +302,24 @@ export default function ListingDetail({ listingId, onBack }: Props) {
             >
               Unarchive
             </button>
+            <button
+              className="admin-button admin-button-small"
+              disabled={busy === 'markReviewed' || !!listing.reviewed_at}
+              onClick={() => runAction('markReviewed')}
+            >
+              Mark reviewed
+            </button>
+            <button
+              className="admin-button admin-button-small admin-button-secondary"
+              disabled={busy === 'markUnreviewed' || !listing.reviewed_at}
+              onClick={() => runAction('markUnreviewed')}
+            >
+              Mark unreviewed
+            </button>
           </div>
           <p className="admin-muted admin-hint">
             Archiving also hides the listing. Unarchiving does not restore visibility — Unhide separately if it should
-            go back live.
+            go back live. Opening this page never marks a listing reviewed by itself — only the explicit button does.
           </p>
 
           <h3>History for this listing</h3>

@@ -51,6 +51,8 @@ export type Listing = {
   archived_at: string | null;
   updated_at: string;
   last_modified_by: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 };
 
 export type ListingPhoto = {
@@ -90,6 +92,7 @@ export type ListingFilters = {
   verificationStatus?: string;
   isHidden?: boolean;
   archived?: boolean;
+  reviewed?: boolean;
   search?: string;
 };
 
@@ -99,6 +102,7 @@ export type DashboardStats = {
   newListings30d: number;
   hiddenListings: number;
   archivedListings: number;
+  unreviewedListings: number;
   pendingReportGroups: number;
   bySource: Record<string, number>;
   recentActivity: AuditEntry[];
@@ -152,4 +156,20 @@ export const adminApi = {
   listingsArchive: (listingId: string) => invoke<{ success: true }>('admin-listings', { action: 'archive', listingId }),
   listingsUnarchive: (listingId: string) =>
     invoke<{ success: true }>('admin-listings', { action: 'unarchive', listingId }),
+
+  listingsMarkReviewed: (listingId: string) =>
+    invoke<{ success: true }>('admin-listings', { action: 'markReviewed', listingId }),
+  listingsMarkUnreviewed: (listingId: string) =>
+    invoke<{ success: true }>('admin-listings', { action: 'markUnreviewed', listingId }),
+
+  // Exactly one of listingIds/filters should be passed — listingIds for an
+  // explicit selection, filters (possibly {}) to act on every currently-
+  // unreviewed listing matching those filters server-side, regardless of
+  // pagination.
+  listingsBulkMarkReviewed: (opts: { listingIds?: string[]; filters?: ListingFilters }) =>
+    invoke<{ success: true; updatedCount: number }>('admin-listings', { action: 'bulkMarkReviewed', ...opts }),
+
+  getSettings: () => invoke<{ data: Record<string, unknown> }>('admin-dashboard', { action: 'getSettings' }),
+  updateSetting: (key: string, value: boolean) =>
+    invoke<{ success: true }>('admin-dashboard', { action: 'updateSetting', key, value }),
 };

@@ -83,3 +83,18 @@ export function archiveListing(adminClient: SupabaseClient, listingId: string, a
 export function unarchiveListing(adminClient: SupabaseClient, listingId: string, adminEmail: string, requestMetadata: unknown) {
   return applyAndLog(adminClient, listingId, 'unarchive', { archived_at: null }, adminEmail, requestMetadata);
 }
+
+export function markListingReviewed(adminClient: SupabaseClient, listingId: string, adminEmail: string, requestMetadata: unknown) {
+  return applyAndLog(
+    adminClient,
+    listingId,
+    'mark_reviewed',
+    { reviewed_at: new Date().toISOString(), reviewed_by: adminEmail },
+    adminEmail,
+    requestMetadata
+  );
+}
+
+export function markListingUnreviewed(adminClient: SupabaseClient, listingId: string, adminEmail: string, requestMetadata: unknown) {
+  return applyAndLog(adminClient, listingId, 'mark_unreviewed', { reviewed_at: null, reviewed_by: null }, adminEmail, requestMetadata);
+}

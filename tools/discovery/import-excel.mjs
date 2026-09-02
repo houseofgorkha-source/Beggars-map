@@ -755,6 +755,16 @@ function assertProductionTarget() {
   }
   checks.push('listings.source column exists');
 
+  const [settingsTableRow] = runSql("select to_regclass('public.admin_settings')::text as s;", { expectRows: true });
+  if (!settingsTableRow?.s) {
+    throw new Error(
+      'REFUSING TO RUN: `admin_settings` does not exist in production. Apply migration ' +
+        '0014_admin_review_state_and_settings.sql first — this importer now reads ' +
+        "the import_default_reviewed setting from it before every run."
+    );
+  }
+  checks.push('admin_settings table exists');
+
   const bucketPaths = storageList(null, '--linked');
   if (!bucketPaths.some((p) => p.replace(/\/$/, '') === BUCKET)) {
     throw new Error(`REFUSING TO RUN: storage bucket "${BUCKET}" not found in production (saw: ${bucketPaths.join(', ') || 'nothing'}).`);
@@ -1089,6 +1099,15 @@ async function main() {
     return;
   }
 
+  // Read once per run, not once per row — an admin flipping the setting
+  // mid-run is an edge case not worth chasing, and reading it up front
+  // means every listing in a single run gets consistent treatment.
+  const [settingsRow] = runSql("select value from admin_settings where key = 'import_default_reviewed';", { expectRows: true });
+  const autoReview = settingsRow?.value === true;
+  console.log(
+    `import_default_reviewed = ${autoReview} -> new listings will be ${autoReview ? 'marked reviewed automatically' : 'left unreviewed (require manual review)'}\n`
+  );
+
   for (const candidate of toImport) {
     console.log(`Importing ${candidate.name}...`);
 
@@ -1128,11 +1147,19 @@ async function main() {
     // uses the same 'discovery-pipeline' actor_label (not a fabricated
     // admin email — this script has no OAuth identity to attribute to);
     // `before_state` is null since this is a create, not an edit.
+    //
+    // reviewed_at/reviewed_by follow the import_default_reviewed setting
+    // read above (0014_admin_review_state_and_settings.sql) — left null
+    // (require manual review, the default) unless an admin has explicitly
+    // opted in to auto-reviewing imports. When auto-reviewing, reviewed_by
+    // is the same 'discovery-pipeline' label as the rest of this row's
+    // provenance, never a fabricated admin identity.
     const insertListing =
-      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label) ` +
+      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label, reviewed_at, reviewed_by) ` +
       `values (${sqlString(SEED_USER_ID)}, ${sqlString(candidate.name)}, ${sqlString(candidate.note)}, ${candidate.price}, ` +
       `${candidate.latitude}, ${candidate.longitude}, ${sqlString(CITY)}, ${sqlString(locationLabel)}, ` +
-      `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true, 'import', 'discovery_pipeline', 'discovery-pipeline') ` +
+      `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true, 'import', 'discovery_pipeline', 'discovery-pipeline', ` +
+      `${autoReview ? 'now()' : 'null'}, ${autoReview ? sqlString('discovery-pipeline') : 'null'}) ` +
       `returning *`;
 
     const photoValues = uploaded.map((p, i) => `(${sqlString(p.url)}, ${sqlString(p.storagePath)}, ${i})`).join(', ');

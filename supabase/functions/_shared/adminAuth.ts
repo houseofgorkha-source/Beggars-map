@@ -89,7 +89,9 @@ export type AuditAction =
   | 'unhide'
   | 'archive'
   | 'unarchive'
-  | 'resolve_report';
+  | 'resolve_report'
+  | 'mark_reviewed'
+  | 'mark_unreviewed';
 
 export type AuditEntry = {
   actor_type: 'admin' | 'discovery_pipeline';

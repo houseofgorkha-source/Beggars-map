@@ -23,18 +23,52 @@ Deno.serve(async (req: Request) => {
   if (!auth.ok) {
     return json({ error: auth.error }, auth.status);
   }
-  const { adminClient } = auth;
+  const { adminClient, email: adminEmail } = auth;
 
   let body: {
     action?: string;
     page?: number;
     pageSize?: number;
     filters?: { actorType?: string; action?: string; targetType?: string; targetId?: string };
+    key?: string;
+    value?: unknown;
   };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  // Only one setting exists so far — an allow-list of exactly one key,
+  // same shape as admin-listings' field allow-list, so a stray/incorrect
+  // key can never silently create a new row this UI doesn't know about.
+  const ALLOWED_SETTINGS = ['import_default_reviewed'];
+
+  if (body.action === 'getSettings') {
+    const { data, error } = await adminClient.from('admin_settings').select('key, value, updated_at, updated_by');
+    if (error) return json({ error: error.message }, 500);
+    const settings: Record<string, unknown> = {};
+    for (const row of data ?? []) settings[row.key] = row.value;
+    return json({ data: settings });
+  }
+
+  if (body.action === 'updateSetting') {
+    if (!body.key || !ALLOWED_SETTINGS.includes(body.key)) {
+      return json({ error: `Unknown or disallowed setting key: ${body.key}` }, 400);
+    }
+    if (typeof body.value !== 'boolean') {
+      return json({ error: 'value must be a boolean' }, 400);
+    }
+    // Settings changes are recorded on the row itself (updated_at/updated_by)
+    // rather than admin_audit_log — that table's target_id is a uuid keyed
+    // to a listing/report, which a text-keyed setting doesn't fit, and
+    // this is a config change, not a moderation action on either of those.
+    const { error } = await adminClient
+      .from('admin_settings')
+      .update({ value: body.value, updated_at: new Date().toISOString(), updated_by: adminEmail })
+      .eq('key', body.key);
+    if (error) return json({ error: error.message }, 500);
+    return json({ success: true });
   }
 
   if (body.action === 'auditLog') {
@@ -68,6 +102,7 @@ Deno.serve(async (req: Request) => {
     newListings30d,
     hiddenListings,
     archivedListings,
+    unreviewedListings,
     bySourceRaw,
     reportGroupsResult,
     recentActivity,
@@ -77,12 +112,13 @@ Deno.serve(async (req: Request) => {
     adminClient.from('listings').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo),
     adminClient.from('listings').select('id', { count: 'exact', head: true }).eq('is_hidden', true),
     adminClient.from('listings').select('id', { count: 'exact', head: true }).not('archived_at', 'is', null),
+    adminClient.from('listings').select('id', { count: 'exact', head: true }).is('reviewed_at', null),
     adminClient.from('listings').select('source'),
     getPendingReportGroups(adminClient),
     adminClient.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(20),
   ]);
 
-  for (const r of [totalListings, newListings7d, newListings30d, hiddenListings, archivedListings, bySourceRaw, recentActivity]) {
+  for (const r of [totalListings, newListings7d, newListings30d, hiddenListings, archivedListings, unreviewedListings, bySourceRaw, recentActivity]) {
     if (r.error) return json({ error: r.error.message }, 500);
   }
   if ('error' in reportGroupsResult) return json({ error: reportGroupsResult.error }, 500);
@@ -100,6 +136,7 @@ Deno.serve(async (req: Request) => {
       newListings30d: newListings30d.count ?? 0,
       hiddenListings: hiddenListings.count ?? 0,
       archivedListings: archivedListings.count ?? 0,
+      unreviewedListings: unreviewedListings.count ?? 0,
       pendingReportGroups: reportGroupsResult.data.length,
       bySource,
       recentActivity: recentActivity.data ?? [],
