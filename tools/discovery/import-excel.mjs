@@ -721,7 +721,8 @@ function assertProductionTarget() {
   checks.push(`API URL ${PRODUCTION_API_URL}`);
 
   const [tableRow] = runSql(
-    "select to_regclass('public.listing_photos')::text as t, to_regclass('public.listings')::text as l;",
+    "select to_regclass('public.listing_photos')::text as t, to_regclass('public.listings')::text as l, " +
+      "to_regclass('public.admin_audit_log')::text as a;",
     { expectRows: true }
   );
   if (!tableRow?.l) throw new Error('REFUSING TO RUN: `listings` not found in the linked project — this does not look like Beggars Map.');
@@ -732,6 +733,27 @@ function assertProductionTarget() {
     );
   }
   checks.push('listing_photos table exists');
+  if (!tableRow?.a) {
+    throw new Error(
+      'REFUSING TO RUN: `admin_audit_log` does not exist in production. Apply migration ' +
+        '0013_admin_v2_provenance_and_audit.sql first — every import from here on writes a ' +
+        'provenance-tagged listing row (source/actor_type/actor_label) plus an audit log entry, ' +
+        'and this script no longer has an unaudited fallback path.'
+    );
+  }
+  checks.push('admin_audit_log table exists');
+
+  const [sourceColRow] = runSql(
+    "select column_name from information_schema.columns where table_name = 'listings' and column_name = 'source';",
+    { expectRows: true }
+  );
+  if (!sourceColRow?.column_name) {
+    throw new Error(
+      'REFUSING TO RUN: `listings.source` does not exist in production. Apply migration ' +
+        '0013_admin_v2_provenance_and_audit.sql first.'
+    );
+  }
+  checks.push('listings.source column exists');
 
   const bucketPaths = storageList(null, '--linked');
   if (!bucketPaths.some((p) => p.replace(/\/$/, '') === BUCKET)) {
@@ -1095,20 +1117,37 @@ async function main() {
     // accept more than one command in ("cannot insert multiple commands
     // into a prepared statement" — confirmed live). A data-modifying CTE
     // gives the same guarantee anyway: a single statement is atomic, so the
-    // listing and every one of its photo rows still land together or not
-    // at all.
+    // listing, every one of its photo rows, and its audit log entry still
+    // land together or not at all.
+    //
+    // Every row this script creates is explicitly tagged as discovery-
+    // pipeline provenance (source/actor_type/actor_label) rather than
+    // falling through to the schema's 'user'/'user' defaults, which would
+    // misrepresent an automated import as an organic user submission —
+    // see 0013_admin_v2_provenance_and_audit.sql. The admin_audit_log row
+    // uses the same 'discovery-pipeline' actor_label (not a fabricated
+    // admin email — this script has no OAuth identity to attribute to);
+    // `before_state` is null since this is a create, not an edit.
     const insertListing =
-      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden) ` +
+      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label) ` +
       `values (${sqlString(SEED_USER_ID)}, ${sqlString(candidate.name)}, ${sqlString(candidate.note)}, ${candidate.price}, ` +
       `${candidate.latitude}, ${candidate.longitude}, ${sqlString(CITY)}, ${sqlString(locationLabel)}, ` +
-      `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true)`;
+      `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true, 'import', 'discovery_pipeline', 'discovery-pipeline') ` +
+      `returning *`;
 
     const photoValues = uploaded.map((p, i) => `(${sqlString(p.url)}, ${sqlString(p.storagePath)}, ${i})`).join(', ');
+    const auditInsert =
+      `insert into admin_audit_log (actor_type, actor_label, action, target_type, target_id, before_state, after_state) ` +
+      `select 'discovery_pipeline', 'discovery-pipeline', 'import', 'listing', ins.id, null, to_jsonb(ins.*) from ins`;
+
     const sql = uploaded.length
-      ? `with ins as (${insertListing} returning id) ` +
+      ? `with ins as (${insertListing}), ` +
+        `photos_ins as (` +
         `insert into listing_photos (listing_id, photo_url, storage_path, position) ` +
-        `select ins.id, v.url, v.path, v.pos from ins, (values ${photoValues}) as v(url, path, pos);`
-      : `${insertListing};`;
+        `select ins.id, v.url, v.path, v.pos from ins, (values ${photoValues}) as v(url, path, pos) returning 1` +
+        `) ` +
+        `${auditInsert};`
+      : `with ins as (${insertListing}) ${auditInsert};`;
     runSql(sql);
 
     const [inserted] = runSql(

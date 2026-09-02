@@ -1,60 +1,61 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { adminSupabase } from './adminSupabase';
-
-type ReportGroup = {
-  listingId: string;
-  name: string;
-  reason: string;
-  reportCount: number;
-  distinctReporterCount: number;
-  latest: string;
-  isHidden: boolean;
-};
+import Dashboard from './views/Dashboard';
+import ListingsList from './views/ListingsList';
+import ListingDetail from './views/ListingDetail';
+import ReportsQueue from './views/ReportsQueue';
+import AuditLog from './views/AuditLog';
+import { adminApi, AuditLogFilters, ListingFilters } from './lib/adminApi';
 
 type AuthState = 'checking' | 'signed-out' | 'not-authorized' | 'authorized';
+type View = 'dashboard' | 'listings' | 'listing-detail' | 'reports' | 'audit';
 
 export default function AdminApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [authState, setAuthState] = useState<AuthState>('checking');
-  const [groups, setGroups] = useState<ReportGroup[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  const loadReports = useCallback(async () => {
-    setError(null);
-    const { data, error: invokeError } = await adminSupabase.functions.invoke<{ data: ReportGroup[] }>('admin-reports', {
-      body: { action: 'list' },
-    });
-    if (invokeError) {
-      // A non-2xx function response surfaces as invokeError — its
-      // .context is the raw Response, so a 403 means "not authorized"
-      // specifically rather than a generic failure.
-      const status = (invokeError as { context?: { status?: number } }).context?.status;
+  const [view, setView] = useState<View>('dashboard');
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [listingsFilters, setListingsFilters] = useState<ListingFilters>({});
+  const [auditFilters, setAuditFilters] = useState<AuditLogFilters>({});
+  const [navKey, setNavKey] = useState(0);
+
+  const checkAuthorized = useCallback(async () => {
+    // A real check that the caller's email is admin-authorized happens
+    // server-side on every Edge Function call — this is only a UI gate to
+    // avoid flashing admin views before we know. Use the cheapest
+    // read-only call (dashboard stats) to confirm; a 403 flips us to
+    // not-authorized without ever having rendered report/listing data.
+    try {
+      await adminApi.dashboardStats();
+      setAuthState('authorized');
+    } catch (err) {
+      const status = (err as { status?: number }).status;
       if (status === 403) {
         setAuthState('not-authorized');
-        return;
+      } else {
+        // Any other failure (network, 500, etc.) must not be treated as
+        // "authorized" — fail closed, surface it as not-authorized too
+        // rather than rendering admin views on an unconfirmed state.
+        setAuthState('not-authorized');
       }
-      setError(invokeError.message);
-      return;
     }
-    setGroups(data?.data ?? []);
-    setAuthState('authorized');
   }, []);
 
   useEffect(() => {
     adminSupabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
-      if (data.session) loadReports();
+      if (data.session) checkAuthorized();
       else setAuthState('signed-out');
     });
     const { data: sub } = adminSupabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      if (newSession) loadReports();
+      if (newSession) checkAuthorized();
       else setAuthState('signed-out');
     });
     return () => sub.subscription.unsubscribe();
-  }, [loadReports]);
+  }, [checkAuthorized]);
 
   async function signIn() {
     await adminSupabase.auth.signInWithOAuth({
@@ -65,23 +66,28 @@ export default function AdminApp() {
 
   async function signOut() {
     await adminSupabase.auth.signOut();
-    setGroups([]);
     setAuthState('signed-out');
   }
 
-  async function runAction(action: 'hide' | 'unhide' | 'resolve', group: ReportGroup) {
-    const key = `${group.listingId}::${group.reason}::${action}`;
-    setBusyKey(key);
-    setError(null);
-    const { error: invokeError } = await adminSupabase.functions.invoke('admin-reports', {
-      body: { action, listingId: group.listingId, reason: group.reason },
-    });
-    setBusyKey(null);
-    if (invokeError) {
-      setError(invokeError.message);
-      return;
-    }
-    await loadReports();
+  function goDashboard() {
+    setView('dashboard');
+  }
+  function goListings(filters: ListingFilters = {}) {
+    setListingsFilters(filters);
+    setNavKey((k) => k + 1);
+    setView('listings');
+  }
+  function goReports() {
+    setView('reports');
+  }
+  function goAudit(filters: AuditLogFilters = {}) {
+    setAuditFilters(filters);
+    setNavKey((k) => k + 1);
+    setView('audit');
+  }
+  function openListing(id: string) {
+    setSelectedListingId(id);
+    setView('listing-detail');
   }
 
   if (authState === 'checking') {
@@ -96,7 +102,7 @@ export default function AdminApp() {
     return (
       <div className="admin-shell">
         <h1>Beggars Map — Admin</h1>
-        <p>Sign in with the admin Google account to review reports.</p>
+        <p>Sign in with the admin Google account to continue.</p>
         <button className="admin-button" onClick={signIn}>
           Sign in with Google
         </button>
@@ -108,7 +114,7 @@ export default function AdminApp() {
     return (
       <div className="admin-shell">
         <h1>Beggars Map — Admin</h1>
-        <p>This account isn't authorized to view report data.</p>
+        <p>This account isn't authorized to view admin data.</p>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
           Sign out
         </button>
@@ -116,74 +122,52 @@ export default function AdminApp() {
     );
   }
 
+  const adminEmail = session?.user.email ?? '';
+
   return (
     <div className="admin-shell">
       <div className="admin-header">
         <h1>Beggars Map — Admin</h1>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
-          Sign out ({session?.user.email})
+          Sign out ({adminEmail})
         </button>
       </div>
 
-      {error ? <p className="admin-error">{error}</p> : null}
+      <nav className="admin-nav">
+        <button className={`admin-nav-tab ${view === 'dashboard' ? 'admin-nav-tab-active' : ''}`} onClick={goDashboard}>
+          Dashboard
+        </button>
+        <button
+          className={`admin-nav-tab ${view === 'listings' || view === 'listing-detail' ? 'admin-nav-tab-active' : ''}`}
+          onClick={() => goListings({})}
+        >
+          Listings
+        </button>
+        <button className={`admin-nav-tab ${view === 'reports' ? 'admin-nav-tab-active' : ''}`} onClick={goReports}>
+          Reports
+        </button>
+        <button className={`admin-nav-tab ${view === 'audit' ? 'admin-nav-tab-active' : ''}`} onClick={() => goAudit({})}>
+          Audit Log
+        </button>
+      </nav>
 
-      {groups.length === 0 ? (
-        <p>No pending reports.</p>
-      ) : (
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Listing</th>
-                <th>Reason</th>
-                <th>Reports</th>
-                <th>Distinct reporters</th>
-                <th>Latest</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((g) => {
-                const rowKey = `${g.listingId}::${g.reason}`;
-                return (
-                  <tr key={rowKey}>
-                    <td>{g.name}</td>
-                    <td>{g.reason}</td>
-                    <td>{g.reportCount}</td>
-                    <td>{g.distinctReporterCount}</td>
-                    <td>{new Date(g.latest).toLocaleString()}</td>
-                    <td>{g.isHidden ? 'Hidden' : 'Visible'}</td>
-                    <td className="admin-actions">
-                      <button
-                        className="admin-button admin-button-small"
-                        disabled={busyKey === `${rowKey}::hide` || g.isHidden}
-                        onClick={() => runAction('hide', g)}
-                      >
-                        Hide
-                      </button>
-                      <button
-                        className="admin-button admin-button-small"
-                        disabled={busyKey === `${rowKey}::unhide` || !g.isHidden}
-                        onClick={() => runAction('unhide', g)}
-                      >
-                        Unhide
-                      </button>
-                      <button
-                        className="admin-button admin-button-small admin-button-secondary"
-                        disabled={busyKey === `${rowKey}::resolve`}
-                        onClick={() => runAction('resolve', g)}
-                      >
-                        Dismiss
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="admin-view">
+        {view === 'dashboard' ? (
+          <Dashboard onNavigateReports={goReports} onNavigateListings={goListings} onNavigateAudit={() => goAudit({})} />
+        ) : null}
+
+        {view === 'listings' ? <ListingsList key={navKey} initialFilters={listingsFilters} onOpenListing={openListing} /> : null}
+
+        {view === 'listing-detail' && selectedListingId ? (
+          <ListingDetail listingId={selectedListingId} onBack={() => setView('listings')} />
+        ) : null}
+
+        {view === 'reports' ? (
+          <ReportsQueue adminEmail={adminEmail} onViewHistory={(listingId) => goAudit({ targetId: listingId })} />
+        ) : null}
+
+        {view === 'audit' ? <AuditLog key={navKey} initialFilters={auditFilters} onOpenListing={openListing} /> : null}
+      </div>
     </div>
   );
 }
