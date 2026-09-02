@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminApi, AuditEntry, AuditLogFilters } from '../lib/adminApi';
+import AuditStateView from '../components/AuditStateView';
 
 type Props = {
   initialFilters?: AuditLogFilters;
@@ -104,10 +105,11 @@ export default function AuditLog({ initialFilters, onOpenListing }: Props) {
                   )}
                 </td>
                 <td>
-                  <details>
-                    <summary>view</summary>
-                    <pre className="admin-json">{JSON.stringify({ before: entry.before_state, after: entry.after_state, request: entry.request_metadata }, null, 2)}</pre>
-                  </details>
+                  <AuditStateView
+                    beforeState={entry.before_state}
+                    afterState={entry.after_state}
+                    requestMetadata={entry.request_metadata}
+                  />
                 </td>
               </tr>
             ))}

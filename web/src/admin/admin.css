@@ -434,3 +434,52 @@ body {
   max-height: 260px;
   overflow-y: auto;
 }
+
+.admin-audit-state {
+  font-size: 12px;
+}
+
+.admin-audit-state > summary {
+  cursor: pointer;
+  color: #ec4899;
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.admin-audit-state > summary:hover {
+  text-decoration: underline;
+}
+
+.admin-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.admin-diff-table th,
+.admin-diff-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.admin-diff-table th {
+  color: #888;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.admin-audit-raw {
+  margin-top: 4px;
+}
+
+.admin-audit-raw > summary {
+  cursor: pointer;
+  color: #888;
+  font-size: 11px;
+}

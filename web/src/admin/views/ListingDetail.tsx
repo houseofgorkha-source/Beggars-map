@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminApi, AuditEntry, Listing, ListingPhoto } from '../lib/adminApi';
+import AuditStateView from '../components/AuditStateView';
 
 type Props = {
   listingId: string;
@@ -305,10 +306,7 @@ export default function ListingDetail({ listingId, onBack }: Props) {
                   <div>
                     <strong>{entry.action}</strong> by {entry.actor_label} — {new Date(entry.created_at).toLocaleString()}
                   </div>
-                  <details>
-                    <summary>before / after</summary>
-                    <pre className="admin-json">{JSON.stringify({ before: entry.before_state, after: entry.after_state }, null, 2)}</pre>
-                  </details>
+                  <AuditStateView beforeState={entry.before_state} afterState={entry.after_state} />
                 </li>
               ))}
             </ul>
