@@ -78,6 +78,11 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Deliberately raw reviewed_at, not isNew: "mark selected" can act on an
+  // explicitly-chosen legacy/pre-baseline listing too (the baseline only
+  // gates what counts as NEW by default, never what an admin can
+  // explicitly choose to review) — matches bulkMarkReviewed's own
+  // "listingIds" mode on the server, which uses the same raw condition.
   const selectedUnreviewedCount = data.filter((l) => selected.has(l.id) && !l.reviewed_at).length;
 
   // "Mark all filtered" and "mark all new" need the exact count of
@@ -263,7 +268,7 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
           </thead>
           <tbody>
             {data.map((l) => {
-              const isNew = !l.reviewed_at;
+              const isNew = l.isNew; // server-computed — never re-derive from reviewed_at
               return (
                 <tr key={l.id} className={isNew ? 'admin-row-new' : ''}>
                   <td onClick={(e) => e.stopPropagation()}>
@@ -302,7 +307,7 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
                     {new Date(l.updated_at).toLocaleDateString()}
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    {isNew ? (
+                    {!l.reviewed_at ? (
                       <button className="admin-button admin-button-small admin-button-secondary" onClick={() => markOneReviewed(l.id)}>
                         Mark reviewed
                       </button>

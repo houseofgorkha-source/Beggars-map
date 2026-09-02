@@ -10,6 +10,7 @@
 
 import { corsHeaders, json, verifyAdmin } from '../_shared/adminAuth.ts';
 import { getPendingReportGroups } from '../_shared/reportGroups.ts';
+import { applyListingFilters, getReviewTrackingBaseline } from '../_shared/listingFilters.ts';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -96,6 +97,22 @@ Deno.serve(async (req: Request) => {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
+  let baseline: string;
+  try {
+    baseline = await getReviewTrackingBaseline(adminClient);
+  } catch (err) {
+    return json({ error: (err as Error).message }, 500);
+  }
+  // Same predicate `list`/`bulkMarkReviewed` use — reviewed_at IS NULL
+  // AND created_at > baseline — never raw reviewed_at IS NULL, so this
+  // count never includes pre-existing legacy listings that were simply
+  // never reviewed under the old workflow.
+  const unreviewedQuery = applyListingFilters(
+    adminClient.from('listings').select('id', { count: 'exact', head: true }),
+    { reviewed: false },
+    baseline
+  );
+
   const [
     totalListings,
     newListings7d,
@@ -112,7 +129,7 @@ Deno.serve(async (req: Request) => {
     adminClient.from('listings').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo),
     adminClient.from('listings').select('id', { count: 'exact', head: true }).eq('is_hidden', true),
     adminClient.from('listings').select('id', { count: 'exact', head: true }).not('archived_at', 'is', null),
-    adminClient.from('listings').select('id', { count: 'exact', head: true }).is('reviewed_at', null),
+    unreviewedQuery,
     adminClient.from('listings').select('source'),
     getPendingReportGroups(adminClient),
     adminClient.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(20),

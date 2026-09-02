@@ -58,6 +58,29 @@ insert into admin_settings (key, value) values
 -- (reviewed_at stays null on import) until an admin explicitly opts in
 -- to auto-review via the admin UI.
 
+-- Review-tracking baseline: the moment this feature started existing in
+-- THIS environment, captured once, here, at apply time — never
+-- recomputed, never touched again by this or any other migration. It
+-- answers a UI question ("should this listing's un-reviewed-ness show up
+-- as a NEW badge?"), not a data-integrity one — it draws zero conclusions
+-- about whether any listing was actually looked at.
+--
+-- The "is new" predicate this baseline supports is:
+--   reviewed_at IS NULL AND created_at > review_tracking_baseline
+-- A listing created before the baseline that has never been reviewed
+-- stays exactly that — reviewed_at NULL, reviewed_by NULL, genuinely
+-- unreviewed — it simply isn't flagged as NEW, because "new" here means
+-- "arrived after we started tracking this," not "reviewed_at happens to
+-- be null." See _shared/listingFilters.ts, the single place this
+-- predicate is implemented.
+--
+-- Local resets naturally get a fresh baseline for free: `now()` here
+-- means "whenever this migration next actually runs," so a from-scratch
+-- local replay always ends up with review-tracking starting at replay
+-- time, with zero explicit backfill step required.
+insert into admin_settings (key, value) values
+  ('review_tracking_baseline', to_jsonb(now()));
+
 -- ---------------------------------------------------------------------
 -- Extend the existing admin-only field lock (0013) to also cover
 -- reviewed_at/reviewed_by — without this, a listing owner could self-
@@ -112,21 +135,12 @@ $$;
 -- Same trigger (listings_lock_is_hidden, 0006/0011) already calls this
 -- function by name — replacing the body is enough.
 
--- ---------------------------------------------------------------------
--- Backfill: every listing that already existed before this feature
--- shipped is marked reviewed now, rather than left null. This is a
--- deliberate policy choice, not a factual claim about history — there
--- was no real "review" event for these rows under this new workflow, so
--- `reviewed_by = 'system-backfill'` makes that transparent in the data
--- itself (distinct from a real admin email or 'discovery-pipeline')
--- rather than silently implying a human reviewed 25 listings in one
--- instant. The alternative (leaving reviewed_at null for everything that
--- already existed) would flood the admin UI with "NEW" badges on
--- long-standing content the moment this ships, which defeats the
--- indicator's purpose — it should flag genuinely new listings going
--- forward, not the entire pre-existing catalog. Matches how 0013's own
--- backfill was handled: a one-time, migration-file-documented decision,
--- not something replayed through admin_audit_log (which only records
--- admin-tool actions from here on, not migration-time backfills).
-update listings set reviewed_at = now(), reviewed_by = 'system-backfill'
-where reviewed_at is null;
+-- No backfill of listings.reviewed_at/reviewed_by. Every existing row
+-- keeps its true, honest state: nobody has reviewed it, so both columns
+-- stay NULL — exactly the same "we don't actually know / it didn't
+-- happen" discipline already used elsewhere (evidence_date is never
+-- guessed; 0013's own backfill used actor_type='unknown' rather than
+-- inventing an actor). Manufacturing a reviewed_at timestamp here would
+-- assert a review event that never occurred. The review_tracking_baseline
+-- setting above is what keeps these rows out of the NEW queue instead —
+-- a UI-layer decision, not a claim written into the row's own data.

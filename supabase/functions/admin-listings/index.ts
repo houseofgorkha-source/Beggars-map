@@ -21,7 +21,7 @@ import {
   markListingReviewed,
   markListingUnreviewed,
 } from '../_shared/listingActions.ts';
-import { applyListingFilters, ListingFilters } from '../_shared/listingFilters.ts';
+import { applyListingFilters, getReviewTrackingBaseline, isListingNew, ListingFilters } from '../_shared/listingFilters.ts';
 
 const ALLOWED_UPDATE_FIELDS = [
   'name',
@@ -77,13 +77,29 @@ Deno.serve(async (req: Request) => {
     const sortBy = VALID_SORT_COLUMNS.includes(body.sortBy ?? '') ? (body.sortBy as string) : 'created_at';
     const sortDir = body.sortDir === 'asc' ? 'asc' : 'desc';
 
-    let query = applyListingFilters(adminClient.from('listings').select('*', { count: 'exact' }), body.filters ?? {});
+    let baseline: string;
+    try {
+      baseline = await getReviewTrackingBaseline(adminClient);
+    } catch (err) {
+      return json({ error: (err as Error).message }, 500);
+    }
+
+    let query = applyListingFilters(adminClient.from('listings').select('*', { count: 'exact' }), body.filters ?? {}, baseline);
     query = query.order(sortBy, { ascending: sortDir === 'asc' }).range((page - 1) * pageSize, page * pageSize - 1);
 
     const { data, error, count } = await query;
     if (error) return json({ error: error.message }, 500);
 
-    return json({ data, total: count ?? 0, page, pageSize });
+    // isNew is computed here, once, server-side — the frontend must never
+    // re-derive "is this new" from reviewed_at alone, since that would
+    // silently reintroduce exactly the pre-baseline-flood bug this whole
+    // design exists to avoid.
+    const withIsNew = (data ?? []).map((row: { reviewed_at: string | null; created_at: string }) => ({
+      ...row,
+      isNew: isListingNew(row, baseline),
+    }));
+
+    return json({ data: withIsNew, total: count ?? 0, page, pageSize });
   }
 
   if (body.action === 'get') {
@@ -96,6 +112,13 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (listingError) return json({ error: listingError.message }, 500);
     if (!listing) return json({ error: 'Listing not found' }, 404);
+
+    let baseline: string;
+    try {
+      baseline = await getReviewTrackingBaseline(adminClient);
+    } catch (err) {
+      return json({ error: (err as Error).message }, 500);
+    }
 
     const { data: photos, error: photosError } = await adminClient
       .from('listing_photos')
@@ -113,7 +136,13 @@ Deno.serve(async (req: Request) => {
       .limit(20);
     if (auditError) return json({ error: auditError.message }, 500);
 
-    return json({ data: { listing, photos: photos ?? [], auditHistory: auditHistory ?? [] } });
+    return json({
+      data: {
+        listing: { ...listing, isNew: isListingNew(listing, baseline) },
+        photos: photos ?? [],
+        auditHistory: auditHistory ?? [],
+      },
+    });
   }
 
   if (body.action === 'update') {
@@ -182,20 +211,35 @@ Deno.serve(async (req: Request) => {
 
   if (body.action === 'bulkMarkReviewed') {
     // Two mutually exclusive modes:
-    //  - listingIds: an explicit set (the "selected" checkboxes case).
+    //  - listingIds: an explicit set (the "selected" checkboxes case) —
+    //    based on raw reviewed_at IS NULL, deliberately WITHOUT the
+    //    baseline restriction. An admin explicitly selecting a legacy
+    //    pre-baseline listing and choosing to review it is a genuine,
+    //    legitimate review action; the baseline only governs what shows
+    //    up in the NEW queue by default, never what an admin is allowed
+    //    to explicitly act on.
     //  - filters: re-applied server-side against the FULL matching set,
-    //    ignoring pagination entirely — {} means "every listing". This is
-    //    what makes "mark all filtered" / "mark all new" correct even
-    //    when the result spans more pages than are currently rendered.
+    //    ignoring pagination entirely — {} means "every NEW listing".
+    //    `reviewed: false` is forced here regardless of what the caller
+    //    sent, so this mode can never touch anything outside the NEW set
+    //    (the same predicate `list` uses for its own "unreviewed only"
+    //    filter) — a legacy listing can never be swept up by "mark all
+    //    new listings as reviewed".
     // Either way, only rows that are CURRENTLY unreviewed are touched and
     // audited — re-marking an already-reviewed listing is a silent no-op,
     // not a second audit entry, so clicking a bulk action twice is safe.
-    let query = adminClient.from('listings').select('id').is('reviewed_at', null);
+    let query;
     if (Array.isArray(body.listingIds)) {
       if (body.listingIds.length === 0) return json({ error: 'listingIds is empty' }, 400);
-      query = query.in('id', body.listingIds);
+      query = adminClient.from('listings').select('id').is('reviewed_at', null).in('id', body.listingIds);
     } else {
-      query = applyListingFilters(query, body.filters ?? {});
+      let baseline: string;
+      try {
+        baseline = await getReviewTrackingBaseline(adminClient);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 500);
+      }
+      query = applyListingFilters(adminClient.from('listings').select('id'), { ...(body.filters ?? {}), reviewed: false }, baseline);
     }
 
     const { data: targets, error: targetsError } = await query;

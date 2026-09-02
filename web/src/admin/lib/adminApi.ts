@@ -53,6 +53,11 @@ export type Listing = {
   last_modified_by: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  // Server-computed (reviewed_at IS NULL AND created_at > the
+  // review_tracking_baseline setting) — the frontend must never re-derive
+  // this from reviewed_at alone, since that would silently flag every
+  // pre-existing listing as NEW again. Always trust this field.
+  isNew: boolean;
 };
 
 export type ListingPhoto = {

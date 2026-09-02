@@ -133,7 +133,7 @@ export default function ListingDetail({ listingId, onBack }: Props) {
           ← Back to listings
         </button>
         <div className="admin-badges">
-          {!listing.reviewed_at ? <span className="admin-badge admin-badge-new">NEW</span> : null}
+          {listing.isNew ? <span className="admin-badge admin-badge-new">NEW</span> : null}
           <span className={`admin-badge admin-badge-source-${listing.source}`}>{listing.source}</span>
           {listing.archived_at ? <span className="admin-badge admin-badge-archived">Archived</span> : null}
           {listing.is_hidden ? <span className="admin-badge admin-badge-hidden">Hidden</span> : null}
@@ -142,7 +142,7 @@ export default function ListingDetail({ listingId, onBack }: Props) {
       </div>
 
       <h2 className="admin-detail-title">
-        {!listing.reviewed_at ? <span className="admin-new-dot" title="New — not yet reviewed" /> : null}
+        {listing.isNew ? <span className="admin-new-dot" title="New — not yet reviewed" /> : null}
         {listing.name}
       </h2>
 
@@ -272,7 +272,9 @@ export default function ListingDetail({ listingId, onBack }: Props) {
             <dd>
               {listing.reviewed_at
                 ? `Reviewed ${new Date(listing.reviewed_at).toLocaleString()} by ${listing.reviewed_by ?? '—'}`
-                : 'Not yet reviewed'}
+                : listing.isNew
+                  ? 'Not yet reviewed'
+                  : 'Not yet reviewed (predates review tracking — not flagged as new)'}
             </dd>
           </dl>
 
