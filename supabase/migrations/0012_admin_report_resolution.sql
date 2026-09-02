@@ -1,0 +1,14 @@
+-- Beggars Map: admin report resolution tracking.
+--
+-- Adds resolved_at so an admin can dismiss a group of reports (same
+-- listing + reason) from the actionable admin view without deleting the
+-- underlying report rows — report history is preserved, just excluded
+-- from the "pending" list once resolved_at is set.
+--
+-- No RLS policy changes and no new public-facing policy: reports are still
+-- only ever readable by the admin-reports Edge Function's service-role
+-- client (which bypasses RLS entirely), never through the public/anon
+-- client. Do NOT add a SELECT policy on reports for this feature — that
+-- would expose report data (including reported_by) to any authenticated
+-- user, which is exactly what this feature must not do.
+alter table reports add column resolved_at timestamptz;

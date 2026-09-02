@@ -10,4 +10,14 @@ export default defineConfig({
   server: {
     host: true,
   },
+  // Second entry point for the standalone admin report view (admin.html /
+  // src/admin/*) — not linked from the public app, its own small bundle.
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        admin: 'admin.html',
+      },
+    },
+  },
 });
