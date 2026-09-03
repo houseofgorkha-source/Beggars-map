@@ -29,6 +29,8 @@
 // Requires the OLA_MAPS_API_KEY secret for the search-page fallback:
 //   npx supabase secrets set OLA_MAPS_API_KEY=<key> --project-ref nvingzluboafxzxgxxwc
 
+import { bestPlaceMatch as pickBestPlace, predictionsToPoints } from '../_shared/placeRanking.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -42,61 +44,23 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
 // OLA's own ranking for a bare text query weighs proximity more than exact
 // name match — verified against a real share.google link ("Dhal roti &
 // more") where the actual place came back 2nd, not 1st, so blindly taking
-// predictions[0] silently returns the wrong business. This instead scores
-// every candidate by how closely its name matches the query text (a sliding
-// window the length of the query, minimum edit distance over all
-// positions — so a candidate with extra trailing text, e.g. a category
-// suffix, isn't unfairly penalized for length) and picks the best match,
-// only if it clears a minimum similarity bar.
-const MIN_MATCH_RATIO = 0.4;
-
+// predictions[0] silently returns the wrong business.
+//
+// The scoring (sliding-window edit distance against the query, plus a
+// POI-over-street_address tiebreak for identically-named candidates) now lives
+// in ../_shared/placeRanking.ts, shared with — and behaviourally identical to —
+// the web and mobile copies. See that module's header for why the type
+// tiebreak is needed: OLA returns street-address geocoder artifacts under the
+// exact same display name as the real restaurant, and this function's previous
+// private copy kept the first candidate on a tie, so it returned whichever OLA
+// ranked first (i.e. the nearest), which for "Juicy Spot" is a street address
+// 1,080 m from the actual place.
 function bestPlaceMatch(query: string, predictions: any[]): { lat: number; lng: number } | null {
-  const normalizedQuery = normalize(query);
-  if (!normalizedQuery) return null;
-
-  let best: { lat: number; lng: number; ratio: number } | null = null;
-  for (const p of predictions) {
-    const lat = p?.geometry?.location?.lat;
-    const lng = p?.geometry?.location?.lng;
-    const name = p?.structured_formatting?.main_text ?? p?.description ?? '';
-    if (typeof lat !== 'number' || typeof lng !== 'number' || !name) continue;
-
-    const candidate = normalize(name);
-    let distance: number;
-    if (candidate.length <= normalizedQuery.length) {
-      distance = levenshtein(normalizedQuery, candidate);
-    } else {
-      distance = Infinity;
-      for (let i = 0; i <= candidate.length - normalizedQuery.length; i++) {
-        distance = Math.min(distance, levenshtein(normalizedQuery, candidate.slice(i, i + normalizedQuery.length)));
-      }
-    }
-    const ratio = 1 - distance / normalizedQuery.length;
-    if (!best || ratio > best.ratio) best = { lat, lng, ratio };
-  }
-
-  return best && best.ratio >= MIN_MATCH_RATIO ? { lat: best.lat, lng: best.lng } : null;
+  const match = pickBestPlace(query, predictionsToPoints(predictions));
+  return match ? { lat: match.lat, lng: match.lng } : null;
 }
 
 Deno.serve(async (req: Request) => {

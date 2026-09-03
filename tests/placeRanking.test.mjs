@@ -12,10 +12,12 @@ import assert from 'node:assert/strict';
 
 import * as web from '../web/src/lib/placeRanking.ts';
 import * as mobile from '../src/lib/placeRanking.ts';
+import * as edge from '../supabase/functions/_shared/placeRanking.ts';
 
 const IMPLS = [
   ['web', web],
   ['mobile', mobile],
+  ['edge', edge],
 ];
 
 // ---------------------------------------------------------------------------
@@ -191,3 +193,95 @@ for (const [label, impl] of IMPLS) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// The Edge Function (resolve-maps-link) consumes RAW OLA predictions rather
+// than the mapped PlaceSuggestion shape the apps use, so it gets its own pass
+// over predictionsToPoints — the adapter where `types` is now preserved and
+// where predictions missing coordinates or a name are dropped.
+// ---------------------------------------------------------------------------
+describe('resolve-maps-link prediction handling (edge)', () => {
+  const { predictionsToPoints, bestPlaceMatch } = edge;
+
+  // The same captured response, in OLA's raw wire shape.
+  const RAW_JUICY_SPOT = [
+    { structured_formatting: { main_text: 'Juicy SPOT' }, types: ['street_address'], geometry: { location: { lat: 12.953836, lng: 77.623053 } } },
+    { structured_formatting: { main_text: 'Juicy SPOT' }, types: ['food', 'restaurant'], geometry: { location: { lat: 12.9459, lng: 77.6288 } } },
+    { structured_formatting: { main_text: 'Juicy SPOT' }, types: ['street_address'], geometry: { location: { lat: 12.924427, lng: 77.616647 } } },
+    { structured_formatting: { main_text: 'Juicy SPOT' }, types: ['street_address'], geometry: { location: { lat: 12.880821, lng: 77.601109 } } },
+  ];
+
+  /** Mirrors the Edge Function's own bestPlaceMatch wrapper exactly. */
+  const resolve = (query, predictions) => {
+    const match = bestPlaceMatch(query, predictionsToPoints(predictions));
+    return match ? { lat: match.lat, lng: match.lng } : null;
+  };
+
+  test('preserves types off the raw prediction', () => {
+    const points = predictionsToPoints(RAW_JUICY_SPOT);
+    assert.equal(points.length, 4);
+    assert.deepEqual(points[1].types, ['food', 'restaurant']);
+    assert.deepEqual(points[0].types, ['street_address']);
+  });
+
+  test('resolves Juicy Spot to the restaurant, not the address 1,080 m away', () => {
+    assert.deepEqual(resolve('Juicy Spot', RAW_JUICY_SPOT), { lat: 12.9459, lng: 77.6288 });
+  });
+
+  test('resolves correctly regardless of OLA’s proximity-driven ordering', () => {
+    for (let i = 0; i < RAW_JUICY_SPOT.length; i++) {
+      const rotated = [...RAW_JUICY_SPOT.slice(i), ...RAW_JUICY_SPOT.slice(0, i)];
+      assert.deepEqual(resolve('Juicy Spot', rotated), { lat: 12.9459, lng: 77.6288 }, `rotation ${i}`);
+    }
+  });
+
+  test('Rajanna: a distant same-chain POI does not beat the named branch', () => {
+    // Both are genuine restaurants ~11 km apart, and the query names one
+    // branch specifically. Type rank is equal, so name specificity must
+    // decide — the generic branch must not win on being listed first.
+    const raw = [
+      { structured_formatting: { main_text: 'Rajanna Military Hotel' }, types: ['food', 'restaurant'], geometry: { location: { lat: 12.9662399, lng: 77.5351318 } } },
+      { structured_formatting: { main_text: 'RAJANNA MILITARY HOTEL TATANAGAR' }, types: ['food', 'restaurant'], geometry: { location: { lat: 13.0562896, lng: 77.576662 } } },
+    ];
+    assert.deepEqual(resolve('Rajanna Military Hotel Tatanagar', raw), { lat: 13.0562896, lng: 77.576662 });
+  });
+
+  test('a street address still wins when its name matches clearly better', () => {
+    const raw = [
+      { structured_formatting: { main_text: 'Totally Different Restaurant' }, types: ['food', 'restaurant'], geometry: { location: { lat: 12.9, lng: 77.6 } } },
+      { structured_formatting: { main_text: 'Juicy Spot' }, types: ['street_address'], geometry: { location: { lat: 12.95, lng: 77.62 } } },
+    ];
+    assert.deepEqual(resolve('Juicy Spot', raw), { lat: 12.95, lng: 77.62 });
+  });
+
+  test('drops predictions with no coordinates or no name', () => {
+    const points = predictionsToPoints([
+      { structured_formatting: { main_text: 'No Coords' }, types: ['food'] },
+      { structured_formatting: { main_text: '' }, geometry: { location: { lat: 12.9, lng: 77.6 } } },
+      { geometry: { location: { lat: 12.9, lng: 77.6 } }, description: 'From description' },
+    ]);
+    assert.equal(points.length, 1);
+    assert.equal(points[0].name, 'From description');
+  });
+
+  test('falls back to description when structured_formatting is absent', () => {
+    const points = predictionsToPoints([
+      { description: 'Dal Roti And More', types: ['establishment'], geometry: { location: { lat: 12.9432, lng: 77.6283 } } },
+    ]);
+    assert.equal(points[0].name, 'Dal Roti And More');
+  });
+
+  test('missing types array becomes empty, never undefined', () => {
+    const points = predictionsToPoints([
+      { structured_formatting: { main_text: 'Untyped Place' }, geometry: { location: { lat: 12.9, lng: 77.6 } } },
+    ]);
+    assert.deepEqual(points[0].types, []);
+  });
+
+  test('returns null rather than guessing when nothing clears the bar', () => {
+    assert.equal(resolve('Juicy Spot', []), null);
+    assert.equal(resolve('Juicy Spot', [
+      { structured_formatting: { main_text: 'Unrelated Place' }, types: ['food'], geometry: { location: { lat: 12.9, lng: 77.6 } } },
+    ]), null);
+  });
+});
