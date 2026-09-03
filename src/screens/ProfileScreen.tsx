@@ -2,7 +2,8 @@ import { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { supabase, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+import { fetchMyListings } from '../lib/listings';
 import { useAuth } from '../lib/auth';
 import type { RootStackParamList } from '../navigation/types';
 import type { Listing } from '../types/database';
@@ -63,12 +64,8 @@ export default function ProfileScreen() {
   const load = useCallback(async () => {
     if (!session) return;
 
-    const { data: listings } = await supabase
-      .from('listings')
-      .select(PUBLIC_LISTING_COLUMNS)
-      .eq('created_by', session.user.id)
-      .order('created_at', { ascending: false });
-    setMyListings((listings as Listing[]) ?? []);
+    const result = await fetchMyListings(session.user.id);
+    setMyListings('data' in result ? result.data : []);
 
     const { data: board } = await supabase.from('leaderboard').select('user_id');
     if (board) {

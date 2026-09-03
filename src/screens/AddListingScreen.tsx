@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { createListing } from '../lib/listings';
 import { useAuth } from '../lib/auth';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
@@ -145,7 +146,7 @@ export default function AddListingScreen() {
     try {
       const photo = await uploadPhoto(session.user.id);
 
-      const { error } = await supabase.from('listings').insert({
+      const result = await createListing({
         created_by: session.user.id,
         name: name.trim(),
         price_rupees: priceNumber,
@@ -158,13 +159,13 @@ export default function AddListingScreen() {
         location_source: locationSource,
       });
 
-      if (error) {
+      if ('error' in result) {
         // The listing never got created, so this upload is orphaned — clean
         // it up rather than leaving it in storage forever. Best-effort: if
         // this delete also fails, the original insert error is still what
         // gets shown to the user.
         if (photo) await supabase.storage.from('listing-photos').remove([photo.path]);
-        Alert.alert('Could not save listing', error.message);
+        Alert.alert('Could not save listing', result.error);
         return;
       }
 

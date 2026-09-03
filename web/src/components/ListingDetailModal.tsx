@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase, ensureAnonymousSession, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
+import { supabase, ensureAnonymousSession } from '../lib/supabase';
+import { fetchListing, fetchVoteCount, hasUserVoted, toggleVote as toggleVoteRequest, reportListing as reportListingRequest, deleteListing as deleteListingRequest } from '../lib/listings';
 import { formatRelativeTime } from '../lib/relativeTime';
 import PhotoLightbox from './PhotoLightbox';
 import type { Listing, ListingPhoto } from '../types';
@@ -79,41 +80,35 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   async function load() {
     // None of these depend on each other's results, so run them concurrently
     // instead of one round-trip after another.
-    const [{ data: listingData, error: listingError }, { count }, photoResult, userId] = await Promise.all([
-      supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).eq('id', listingId).maybeSingle(),
-      supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId),
+    const [listingResult, voteCount, photoResult, userId] = await Promise.all([
+      fetchListing(listingId),
+      fetchVoteCount(listingId),
       supabase.from('listing_photos').select('*').eq('listing_id', listingId).order('position', { ascending: true }),
       ensureAnonymousSession(),
     ]);
 
     // A listing that's been deleted, or hidden by moderation (RLS filters it
     // out of public SELECT), comes back as no row rather than an error —
-    // .maybeSingle() (not .single()) is what makes that "no row" case land
-    // here as null instead of throwing, so we can tell it apart from "still
-    // fetching" and show a real message instead of spinning forever.
-    if (listingError || !listingData) {
+    // fetchListing's `notFound` case is what makes that land here as null
+    // instead of throwing, so we can tell it apart from "still fetching"
+    // and show a real message instead of spinning forever.
+    if ('error' in listingResult || !listingResult.data) {
       setNotFound(true);
       return;
     }
 
-    setListing(listingData as Listing);
+    setListing(listingResult.data);
     // Deliberately non-fatal: `listing_photos` is not present in every
     // environment (it is missing from production as of this writing, where
     // the request comes back as an error rather than an empty list). A
     // listing that can't load its extra photos still shows its primary
     // photo and everything else, exactly as it did before this existed.
     setExtraPhotos((photoResult.error ? [] : (photoResult.data as ListingPhoto[] | null)) ?? []);
-    setVoteCount(count ?? 0);
+    setVoteCount(voteCount);
     setMyUserId(userId);
 
     if (userId) {
-      const { data: myVote } = await supabase
-        .from('votes')
-        .select('listing_id')
-        .eq('listing_id', listingId)
-        .eq('created_by', userId)
-        .maybeSingle();
-      setHasVoted(!!myVote);
+      setHasVoted(await hasUserVoted(listingId, userId));
     }
   }
 
@@ -162,11 +157,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     const userId = await ensureAnonymousSession();
     if (!userId) return;
 
-    if (hasVoted) {
-      await supabase.from('votes').delete().eq('listing_id', listingId).eq('created_by', userId);
-    } else {
-      await supabase.from('votes').insert({ listing_id: listingId, created_by: userId });
-    }
+    await toggleVoteRequest(listingId, userId, hasVoted);
     load();
     onUpdated?.();
   }
@@ -177,13 +168,9 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
       setReportFeedback('Could not start a session. Please refresh and try again.');
       return;
     }
-    const { error: reportError } = await supabase.from('reports').insert({ listing_id: listingId, reported_by: userId, reason });
-    if (reportError) {
-      if (reportError.code === '23505') {
-        setReportFeedback("You've already reported this listing for that reason.");
-        return;
-      }
-      setReportFeedback(`Could not send report: ${reportError.message}`);
+    const result = await reportListingRequest(listingId, userId, reason);
+    if ('error' in result) {
+      setReportFeedback(result.error);
       return;
     }
     // Shown inline rather than via window.alert — a blocking native dialog
@@ -205,9 +192,9 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     if (!listing) return;
     if (!window.confirm('Delete this listing? This removes it for everyone and cannot be undone.')) return;
 
-    const { error } = await supabase.from('listings').delete().eq('id', listing.id);
-    if (error) {
-      window.alert(`Could not delete listing: ${error.message}`);
+    const result = await deleteListingRequest(listing.id);
+    if ('error' in result) {
+      window.alert(`Could not delete listing: ${result.error}`);
       return;
     }
     if (listing.photo_url) {

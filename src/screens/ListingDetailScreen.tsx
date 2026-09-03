@@ -4,7 +4,8 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
-import { supabase, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+import { fetchListing, fetchVoteCount, hasUserVoted, toggleVote as toggleVoteRequest, reportListing as reportListingRequest, deleteListing as deleteListingRequest } from '../lib/listings';
 import { useAuth } from '../lib/auth';
 import { vectorStyleUrl, boundsForPoints } from '../lib/olaMaps';
 import { reverseGeocode } from '../lib/geocoding';
@@ -30,32 +31,25 @@ export default function ListingDetailScreen() {
   const load = useCallback(async () => {
     // None of these depend on each other's results, so run them concurrently
     // instead of one round-trip after another.
-    const [{ data: listingData, error: listingError }, { count }, myVoteResult] = await Promise.all([
-      supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).eq('id', params.listingId).maybeSingle(),
-      supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', params.listingId),
-      session
-        ? supabase
-            .from('votes')
-            .select('listing_id')
-            .eq('listing_id', params.listingId)
-            .eq('created_by', session.user.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
+    const [listingResult, voteCount, voted] = await Promise.all([
+      fetchListing(params.listingId),
+      fetchVoteCount(params.listingId),
+      session ? hasUserVoted(params.listingId, session.user.id) : Promise.resolve(false),
     ]);
 
     // A listing that's been deleted, or hidden by moderation (RLS filters it
     // out of public SELECT), comes back as no row rather than an error —
-    // .maybeSingle() (not .single()) is what makes that "no row" case land
-    // here as null instead of throwing, so we can tell it apart from "still
-    // fetching" and show a real message instead of spinning forever.
-    if (listingError || !listingData) {
+    // fetchListing's `notFound` case is what makes that land here as null
+    // instead of throwing, so we can tell it apart from "still fetching"
+    // and show a real message instead of spinning forever.
+    if ('error' in listingResult || !listingResult.data) {
       setNotFound(true);
       return;
     }
 
-    setListing(listingData as Listing);
-    setVoteCount(count ?? 0);
-    setHasVoted(!!myVoteResult.data);
+    setListing(listingResult.data);
+    setVoteCount(voteCount);
+    setHasVoted(voted);
   }, [params.listingId, session]);
 
   useFocusEffect(
@@ -81,11 +75,7 @@ export default function ListingDetailScreen() {
       navigation.navigate('SignIn');
       return;
     }
-    if (hasVoted) {
-      await supabase.from('votes').delete().eq('listing_id', params.listingId).eq('created_by', session.user.id);
-    } else {
-      await supabase.from('votes').insert({ listing_id: params.listingId, created_by: session.user.id });
-    }
+    await toggleVoteRequest(params.listingId, session.user.id, hasVoted);
     load();
   }
 
@@ -114,13 +104,9 @@ export default function ListingDetailScreen() {
       ...REPORT_REASONS.map((reason) => ({
         text: reason,
         onPress: async () => {
-          const { error } = await supabase.from('reports').insert({
-            listing_id: params.listingId,
-            reported_by: session.user.id,
-            reason,
-          });
-          if (error?.code === '23505') {
-            Alert.alert('Already reported', 'You already reported this listing for that reason.');
+          const result = await reportListingRequest(params.listingId, session.user.id, reason);
+          if ('error' in result && result.duplicate) {
+            Alert.alert('Already reported', result.error);
             return;
           }
           Alert.alert('Thanks', 'We\'ll take a look.');
@@ -139,9 +125,9 @@ export default function ListingDetailScreen() {
 
   async function deleteListing() {
     if (!listing) return;
-    const { error } = await supabase.from('listings').delete().eq('id', listing.id);
-    if (error) {
-      Alert.alert('Could not delete listing', error.message);
+    const result = await deleteListingRequest(listing.id);
+    if ('error' in result) {
+      Alert.alert('Could not delete listing', result.error);
       return;
     }
     if (listing.photo_url) {

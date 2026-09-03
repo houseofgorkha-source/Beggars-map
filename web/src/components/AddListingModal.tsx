@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
+import { createListing } from '../lib/listings';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -248,41 +249,38 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
 
       const [photos, resolvedLabel] = await Promise.all([uploadPhotos(userId), resolveLocationLabel()]);
 
-      const { data: inserted, error: insertError } = await supabase
-        .from('listings')
-        .insert({
-          created_by: userId,
-          name: name.trim(),
-          price_rupees: priceNumber,
-          note: note.trim() || null,
-          // First photo doubles as the single `photo_url` every other
-          // consumer (list card, map popup, listing detail, mobile app)
-          // already knows how to show — the rest live only in
-          // `listing_photos`, additive, nothing else needs to change.
-          photo_url: photos[0]?.url ?? null,
-          latitude: coords.lat,
-          longitude: coords.lon,
-          // Best-effort human-readable descriptor for the same coords —
-          // null when reverse geocoding hasn't resolved (or found) anything
-          // within resolveLocationLabel's own wait window, never a
-          // placeholder/fabricated value.
-          location_label: resolvedLabel,
-          // Stage 2A location provenance (0015) — set at every point above
-          // that changes `coords`, never inferred here at submit time.
-          location_source: locationSource,
-        })
-        .select('id')
-        .single();
+      const insertResult = await createListing({
+        created_by: userId,
+        name: name.trim(),
+        price_rupees: priceNumber,
+        note: note.trim() || null,
+        // First photo doubles as the single `photo_url` every other
+        // consumer (list card, map popup, listing detail, mobile app)
+        // already knows how to show — the rest live only in
+        // `listing_photos`, additive, nothing else needs to change.
+        photo_url: photos[0]?.url ?? null,
+        latitude: coords.lat,
+        longitude: coords.lon,
+        // Best-effort human-readable descriptor for the same coords —
+        // null when reverse geocoding hasn't resolved (or found) anything
+        // within resolveLocationLabel's own wait window, never a
+        // placeholder/fabricated value.
+        location_label: resolvedLabel,
+        // Stage 2A location provenance (0015) — set at every point above
+        // that changes `coords`, never inferred here at submit time.
+        location_source: locationSource,
+      });
 
-      if (insertError || !inserted) {
+      if ('error' in insertResult) {
         // The listing never got created, so these uploads are orphaned —
         // clean them up rather than leaving them in storage forever.
         // Best-effort: if this delete also fails, the original insert error
         // is still what gets shown to the user.
         if (photos.length) await supabase.storage.from('listing-photos').remove(photos.map((p) => p.path));
-        setError(insertError?.message ?? 'Could not create listing.');
+        setError(insertResult.error);
         return;
       }
+      const inserted = { id: insertResult.id };
 
       if (photos.length > 1) {
         const { error: photosError } = await supabase
