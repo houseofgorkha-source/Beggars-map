@@ -243,8 +243,13 @@ describe('Public data boundary (C-2)', { skip: !stackReachable && 'local Supabas
   });
 
   test('the public column set still returns real data', async () => {
+    // Deliberately no `votes(count)` embed here — 0019 revokes all direct
+    // grants on `votes`, including the table-level access PostgREST's
+    // embedded-resource count needs to expand; see that migration and the
+    // dedicated 'Votes privacy boundary' suite below for how vote counts
+    // are read instead (the `listing_vote_counts` view).
     const res = await fetch(
-      `${API}/rest/v1/listings?select=id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label,votes(count)&limit=1`,
+      `${API}/rest/v1/listings?select=id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label&limit=1`,
       { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } }
     );
     assert.equal(res.status, 200);
@@ -265,8 +270,92 @@ describe('Public data boundary (C-2)', { skip: !stackReachable && 'local Supabas
     assert.equal(res.status, 401);
   });
 
-  // votes is a KNOWN, deliberately unaddressed gap (see 0017's own header
-  // comment and the P2 implementation report) — not tested as "protected"
-  // here, since it isn't. This is a placeholder for when it is fixed.
-  test.todo('votes should not allow bulk enumeration of (listing_id, created_by) pairs — deferred, needs a design decision');
+});
+
+describe('Votes privacy boundary (P2 / 0019)', { skip: !stackReachable && 'local Supabase stack not reachable at 127.0.0.1:54321' }, () => {
+  let sessionA;
+  let sessionB;
+  let listingId;
+
+  before(async () => {
+    sessionA = await createAnonSession();
+    sessionB = await createAnonSession();
+    // Any real listing works — vote RPCs don't care about is_hidden.
+    const res = await fetch(`${API}/rest/v1/listings?select=id&limit=1`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+    [{ id: listingId }] = await res.json();
+  });
+
+  after(async () => {
+    await fetch(`${API}/rest/v1/rpc/remove_vote`, {
+      method: 'POST',
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${sessionA.jwt}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_listing_id: listingId }),
+    });
+    if (sessionA?.userId) await serviceDelete('profiles', sessionA.userId);
+    if (sessionB?.userId) await serviceDelete('profiles', sessionB.userId);
+  });
+
+  async function rpc(name, jwt, body) {
+    return fetch(`${API}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  test('direct table reads of votes are fully blocked (no bulk enumeration of (listing_id, created_by))', async () => {
+    const res = await fetch(`${API}/rest/v1/votes?select=*&limit=1`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${sessionA.jwt}` } });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.code, '42501');
+  });
+
+  test('the public vote-count view exposes only listing_id/vote_count, never created_by', async () => {
+    const res = await fetch(`${API}/rest/v1/listing_vote_counts?select=*&limit=1`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+    assert.equal(res.status, 200);
+    const explicitRes = await fetch(`${API}/rest/v1/listing_vote_counts?select=created_by&limit=1`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+    assert.equal(explicitRes.status, 400, 'created_by must not exist on this view at all');
+  });
+
+  test('a user can vote for themselves, and has_voted reflects it', async () => {
+    assert.equal((await (await rpc('has_voted', sessionA.jwt, { p_listing_id: listingId })).json()), false);
+    const addRes = await rpc('add_vote', sessionA.jwt, { p_listing_id: listingId });
+    assert.equal(addRes.status, 204);
+    assert.equal((await (await rpc('has_voted', sessionA.jwt, { p_listing_id: listingId })).json()), true);
+  });
+
+  test('duplicate self-vote is a no-op, not a second row (dedupe protection intact)', async () => {
+    const res = await rpc('add_vote', sessionA.jwt, { p_listing_id: listingId });
+    assert.equal(res.status, 204);
+    const countRes = await fetch(`${API}/rest/v1/listing_vote_counts?listing_id=eq.${listingId}`, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+    const [row] = await countRes.json();
+    assert.equal(row.vote_count, 1);
+  });
+
+  test("has_voted for a different user never reflects someone else's vote (no identity leak)", async () => {
+    assert.equal((await (await rpc('has_voted', sessionB.jwt, { p_listing_id: listingId })).json()), false);
+  });
+
+  test("a user cannot manipulate another user's vote — remove_vote only ever targets the caller's own row", async () => {
+    const res = await rpc('remove_vote', sessionB.jwt, { p_listing_id: listingId });
+    assert.equal(res.status, 204, "B's own remove_vote call must still succeed (as a no-op), even though B never voted");
+    assert.equal((await (await rpc('has_voted', sessionA.jwt, { p_listing_id: listingId })).json()), true, "A's vote must survive B calling remove_vote — there is no user-id parameter to target A with");
+  });
+
+  test('a user can remove their own vote', async () => {
+    const res = await rpc('remove_vote', sessionA.jwt, { p_listing_id: listingId });
+    assert.equal(res.status, 204);
+    assert.equal((await (await rpc('has_voted', sessionA.jwt, { p_listing_id: listingId })).json()), false);
+  });
+
+  test('an unauthenticated caller (bare anon key, no user JWT) gets a safe false, never an error leaking data', async () => {
+    const res = await rpc('has_voted', ANON_KEY, { p_listing_id: listingId });
+    assert.equal(res.status, 200);
+    assert.equal(await res.json(), false);
+  });
+
+  test('service_role retains full direct access to votes (account-deletion cascade, admin tooling)', async () => {
+    const res = await fetch(`${API}/rest/v1/votes?select=*&limit=1`, { headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
+    assert.equal(res.status, 200);
+  });
 });

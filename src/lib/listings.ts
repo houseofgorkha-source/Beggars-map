@@ -23,13 +23,17 @@ export type ListingWithVoteCount = Listing & { voteCount: number };
 const LISTING_FETCH_LIMIT = 2000;
 
 export async function fetchListings(): Promise<{ data: ListingWithVoteCount[] } | { error: string }> {
-  const { data, error } = await supabase
-    .from('listings')
-    .select(`${PUBLIC_LISTING_COLUMNS}, votes(count)`)
-    .order('price_rupees', { ascending: true })
-    .limit(LISTING_FETCH_LIMIT);
+  // Two queries, not a `votes(count)` embed: PostgREST's embedded-resource
+  // count needs table-level SELECT on `votes` to expand, which 0019 no
+  // longer grants (see that migration for why). `listing_vote_counts` is a
+  // public view exposing only the aggregate, no voter identity.
+  const [{ data, error }, { data: voteRows }] = await Promise.all([
+    supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).order('price_rupees', { ascending: true }).limit(LISTING_FETCH_LIMIT),
+    supabase.from('listing_vote_counts').select('listing_id, vote_count'),
+  ]);
   if (error || !data) return { error: error?.message ?? 'Could not load listings.' };
-  return { data: data.map((row: any) => ({ ...row, voteCount: row.votes?.[0]?.count ?? 0 })) };
+  const voteCounts = new Map((voteRows ?? []).map((row: any) => [row.listing_id, row.vote_count as number]));
+  return { data: data.map((row: any) => ({ ...row, voteCount: voteCounts.get(row.id) ?? 0 })) };
 }
 
 export async function fetchMyListings(userId: string): Promise<{ data: Listing[] } | { error: string }> {
@@ -73,20 +77,25 @@ export async function deleteListing(id: string): Promise<{ ok: true } | { error:
 }
 
 export async function fetchVoteCount(listingId: string): Promise<number> {
-  const { count } = await supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId);
-  return count ?? 0;
+  const { data } = await supabase.from('listing_vote_counts').select('vote_count').eq('listing_id', listingId).maybeSingle();
+  return data?.vote_count ?? 0;
 }
 
-export async function hasUserVoted(listingId: string, userId: string): Promise<boolean> {
-  const { data } = await supabase.from('votes').select('listing_id').eq('listing_id', listingId).eq('created_by', userId).maybeSingle();
+// userId is unused — kept in the signature so every call site stays
+// unchanged. Voter identity is never sent from the client: the RPC checks
+// auth.uid() itself, so a caller can only ever learn their OWN vote status
+// (see 0019_votes_privacy_boundary.sql for why a direct table read can't
+// do this without also exposing every other user's created_by).
+export async function hasUserVoted(listingId: string, _userId: string): Promise<boolean> {
+  const { data } = await supabase.rpc('has_voted', { p_listing_id: listingId });
   return !!data;
 }
 
-export async function toggleVote(listingId: string, userId: string, currentlyVoted: boolean): Promise<void> {
+export async function toggleVote(listingId: string, _userId: string, currentlyVoted: boolean): Promise<void> {
   if (currentlyVoted) {
-    await supabase.from('votes').delete().eq('listing_id', listingId).eq('created_by', userId);
+    await supabase.rpc('remove_vote', { p_listing_id: listingId });
   } else {
-    await supabase.from('votes').insert({ listing_id: listingId, created_by: userId });
+    await supabase.rpc('add_vote', { p_listing_id: listingId });
   }
 }
 
