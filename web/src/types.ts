@@ -1,3 +1,10 @@
+// Matches PUBLIC_LISTING_COLUMNS (lib/supabase.ts) exactly — every field the
+// public anon/authenticated client actually has a column-level SELECT grant
+// on. Admin-only columns (is_hidden, source, verification_status,
+// reviewed_by, location_source, etc.) are deliberately absent here: the web
+// app's queries never receive them, and the admin panel has its own,
+// separate Listing type (web/src/admin/lib/adminApi.ts) for the
+// service-role-backed data it actually needs.
 export type Listing = {
   id: string;
   created_by: string;
@@ -8,7 +15,6 @@ export type Listing = {
   latitude: number;
   longitude: number;
   city: string;
-  is_hidden: boolean;
   created_at: string;
   // Human-readable location descriptor (e.g. "100 Feet Road, Indiranagar",
   // or "Indiranagar, Bengaluru" when street-level data isn't available) —

@@ -21,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { supabase } from '../lib/supabase';
+import { supabase, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import ListingsMap from '../components/ListingsMap';
@@ -153,7 +153,10 @@ export default function MapScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('listings').select('*, votes(count)').order('price_rupees', { ascending: true });
+    const { data, error } = await supabase
+      .from('listings')
+      .select(`${PUBLIC_LISTING_COLUMNS}, votes(count)`)
+      .order('price_rupees', { ascending: true });
 
     if (!error && data) {
       const mapped: ListingWithDistance[] = data.map((row: any) => ({

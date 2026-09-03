@@ -11,6 +11,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// The exact columns anon/authenticated hold a Postgres column-level SELECT
+// grant on for `listings` (see supabase/migrations/0017_public_data_boundary.sql)
+// — admin/internal/provenance columns (is_hidden, source, verification_status,
+// reviewed_by, location_source, etc.) are deliberately excluded so they're
+// never returned to a public request, regardless of what a caller asks for.
+// `select('*')` is NOT equivalent to this: PostgreSQL requires table-level
+// SELECT to use the `*` wildcard at all, so every public listings query must
+// spell out this exact list (or a subset of it) instead of using `*` — this
+// isn't a style preference, an unrestricted `*` query fails outright with
+// "permission denied for table listings" under a column-level grant.
+export const PUBLIC_LISTING_COLUMNS =
+  'id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label';
+
 let anonymousSessionPromise: Promise<string | null> | null = null;
 
 // The web launch has no visible sign-in — every visitor gets a silent Supabase

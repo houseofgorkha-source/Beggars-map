@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase, ensureAnonymousSession } from '../lib/supabase';
+import { supabase, ensureAnonymousSession, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
 import { formatRelativeTime } from '../lib/relativeTime';
 import PhotoLightbox from './PhotoLightbox';
 import type { Listing, ListingPhoto } from '../types';
@@ -80,7 +80,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     // None of these depend on each other's results, so run them concurrently
     // instead of one round-trip after another.
     const [{ data: listingData, error: listingError }, { count }, photoResult, userId] = await Promise.all([
-      supabase.from('listings').select('*').eq('id', listingId).maybeSingle(),
+      supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).eq('id', listingId).maybeSingle(),
       supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', listingId),
       supabase.from('listing_photos').select('*').eq('listing_id', listingId).order('position', { ascending: true }),
       ensureAnonymousSession(),

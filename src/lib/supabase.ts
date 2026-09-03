@@ -20,3 +20,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
   },
 });
+
+// The exact columns anon/authenticated hold a Postgres column-level SELECT
+// grant on for `listings` (see supabase/migrations/0017_public_data_boundary.sql,
+// same grant web/src/lib/supabase.ts's copy of this constant documents) —
+// admin/internal/provenance columns are deliberately excluded. `select('*')`
+// is NOT equivalent: PostgreSQL requires table-level SELECT to use the `*`
+// wildcard at all, so a public listings query must spell out this list (or a
+// subset) instead — an unrestricted `*` query fails outright with
+// "permission denied for table listings" under a column-level grant.
+export const PUBLIC_LISTING_COLUMNS =
+  'id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label';

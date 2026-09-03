@@ -4,6 +4,13 @@ export type Profile = {
   created_at: string;
 };
 
+// Every public query selects PUBLIC_LISTING_COLUMNS (lib/supabase.ts),
+// which anon/authenticated hold a Postgres column-level SELECT grant on —
+// admin/internal columns (is_hidden, source, verification_status,
+// reviewed_by, etc.) are deliberately absent, since they're never actually
+// returned to this app. location_label is also part of that grant but
+// omitted here since no mobile screen displays it (mobile resolves its own
+// address live via geocoding.ts instead — see AGENTS.md).
 export type Listing = {
   id: string;
   created_by: string;
@@ -14,7 +21,6 @@ export type Listing = {
   latitude: number;
   longitude: number;
   city: string;
-  is_hidden: boolean;
   created_at: string;
 };
 

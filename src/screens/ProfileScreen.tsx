@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { supabase } from '../lib/supabase';
+import { supabase, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import type { RootStackParamList } from '../navigation/types';
 import type { Listing } from '../types/database';
@@ -65,7 +65,7 @@ export default function ProfileScreen() {
 
     const { data: listings } = await supabase
       .from('listings')
-      .select('*')
+      .select(PUBLIC_LISTING_COLUMNS)
       .eq('created_by', session.user.id)
       .order('created_at', { ascending: false });
     setMyListings((listings as Listing[]) ?? []);

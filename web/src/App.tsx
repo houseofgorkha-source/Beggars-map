@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
-import { supabase } from './lib/supabase';
+import { supabase, PUBLIC_LISTING_COLUMNS } from './lib/supabase';
 import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPlaces';
 import { placeTypeRank, TYPE_RANK_POI } from './lib/placeRanking';
 import { formatRelativeTime } from './lib/relativeTime';
@@ -269,7 +269,10 @@ export default function App() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const { data, error } = await supabase.from('listings').select('*, votes(count)').order('price_rupees', { ascending: true });
+    const { data, error } = await supabase
+      .from('listings')
+      .select(`${PUBLIC_LISTING_COLUMNS}, votes(count)`)
+      .order('price_rupees', { ascending: true });
     if (error || !data) {
       setLoadError("Couldn't load listings. Check your connection and try again.");
       setLoading(false);

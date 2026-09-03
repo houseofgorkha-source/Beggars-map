@@ -4,7 +4,7 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
-import { supabase } from '../lib/supabase';
+import { supabase, PUBLIC_LISTING_COLUMNS } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { vectorStyleUrl, boundsForPoints } from '../lib/olaMaps';
 import { reverseGeocode } from '../lib/geocoding';
@@ -31,7 +31,7 @@ export default function ListingDetailScreen() {
     // None of these depend on each other's results, so run them concurrently
     // instead of one round-trip after another.
     const [{ data: listingData, error: listingError }, { count }, myVoteResult] = await Promise.all([
-      supabase.from('listings').select('*').eq('id', params.listingId).maybeSingle(),
+      supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).eq('id', params.listingId).maybeSingle(),
       supabase.from('votes').select('*', { count: 'exact', head: true }).eq('listing_id', params.listingId),
       session
         ? supabase
