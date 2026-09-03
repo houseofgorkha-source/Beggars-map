@@ -177,3 +177,83 @@ from (values
   ('ace9609d-5f0a-433c-af08-77b4c3575284'::uuid, 'ChIJwU6gtW49rjsRWLODyUkDOPc')
 ) as known_imports(id, place_id)
 where listings.id = known_imports.id;
+
+-- ---------------------------------------------------------------------
+-- INSERT-time protection for the five columns above (remediation for
+-- CTO-audit finding C-1, extended to Stage 2A — added 2026-09-03, before
+-- this migration has ever been applied anywhere).
+--
+-- Without this, the same gap C-1 identified for the original 11
+-- admin-controlled columns would apply to these five the moment this
+-- migration ships: any anonymous/authenticated caller could INSERT a
+-- listing already claiming location_confidence='human_confirmed',
+-- location_source='admin', a forged location_verified_by, etc.
+--
+-- This is a SEPARATE function and trigger from
+-- lock_listing_admin_fields() (0016), not an extension of it, for a
+-- concrete reason discovered while preparing this amendment: 0016 is a
+-- migration that already exists, is already approved and committed, and
+-- is numbered AFTER this one — so in file-order replay, 0016's own
+-- `create or replace function public.lock_listing_admin_fields()`
+-- always runs after whatever this file does to the same function name,
+-- and completely REPLACES its body. Confirmed empirically against the
+-- local stack (which already has both 0015's original content and 0016
+-- applied): 0016's replacement body only covers the 11 pre-Stage-2A
+-- columns, which means the moment 0016 ran, it silently reverted the
+-- UPDATE-time protection this migration's own function replacement
+-- above had already established for these five columns — a real,
+-- observed regression, not a hypothetical one, reproduced live via a
+-- forged owner UPDATE that successfully set location_source='admin' and
+-- location_verified_by to an arbitrary value. Amending 0016 to fix this
+-- is out of scope for this pass (0016 is already approved and should
+-- not be re-opened here); a genuinely independent function/trigger pair
+-- sidesteps the conflict entirely; it composes safely with 0016's
+-- function since the two touch disjoint columns, and it protects these
+-- five columns correctly regardless of whether 0016 has run yet. A
+-- future pass MAY consolidate these into one shared function once both
+-- are stable in production — not attempted here, to keep this change
+-- reviewable and scoped to exactly what it claims to do.
+--
+-- One function handles both events (TG_OP-branched, same pattern as
+-- 0016's own admin-fields function) since, unlike 0016, this needed to
+-- both ADD insert-time defaults and RESTORE the update-time revert this
+-- migration's own earlier statement already established.
+
+create or replace function public.lock_listing_location_fields()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.role() <> 'service_role' then
+    if TG_OP = 'INSERT' then
+      new.location_source := 'unknown';
+      new.location_confidence := 'unknown';
+      new.location_verified_at := null;
+      new.location_verified_by := null;
+      new.provider_place_ids := '{}'::jsonb;
+    else
+      if new.location_source is distinct from old.location_source then
+        new.location_source := old.location_source;
+      end if;
+      if new.location_confidence is distinct from old.location_confidence then
+        new.location_confidence := old.location_confidence;
+      end if;
+      if new.location_verified_at is distinct from old.location_verified_at then
+        new.location_verified_at := old.location_verified_at;
+      end if;
+      if new.location_verified_by is distinct from old.location_verified_by then
+        new.location_verified_by := old.location_verified_by;
+      end if;
+      if new.provider_place_ids is distinct from old.provider_place_ids then
+        new.provider_place_ids := old.provider_place_ids;
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger listings_lock_location_fields
+  before insert or update on public.listings
+  for each row
+  execute function public.lock_listing_location_fields();

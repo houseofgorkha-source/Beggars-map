@@ -10,10 +10,13 @@
 // own implementation report for what WAS verified live, against the local
 // Docker stack, earlier in the same pass): that applying 0015 leaves the 25
 // production listings' coordinates byte-identical, that the lock trigger
-// actually rejects a non-service-role write to the new columns, and that
-// service_role can still write them. Re-run those checks (documented in the
-// report) once the local stack is back up, before this is applied anywhere
-// beyond local.
+// actually rejects a non-service-role write to the new columns (INSERT and
+// UPDATE alike — 0015 now carries its own INSERT+UPDATE trigger for these
+// five columns, `lock_listing_location_fields`, kept deliberately separate
+// from 0016's `lock_listing_admin_fields` for the 11 pre-Stage-2A columns;
+// see 0015's own comment on why they aren't merged), and that service_role
+// can still write them. Re-run those checks (documented in the report) once
+// the local stack is back up, before this is applied anywhere beyond local.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -88,6 +91,52 @@ describe('0015 migration (static check against the committed SQL)', () => {
     const backfillSection = sql.slice(sql.indexOf('update listings set'));
     assert.match(backfillSection, /location_confidence = 'medium'/);
     assert.doesNotMatch(backfillSection, /location_confidence = 'human_confirmed'/);
+  });
+
+  // -------------------------------------------------------------------
+  // P1-2: INSERT-time protection for the five location columns, added
+  // 2026-09-03 as a separate function/trigger from 0016's
+  // lock_listing_admin_fields (see this migration's own comment for why
+  // they can't be the same function — 0016 is a later-numbered,
+  // already-committed migration that would otherwise clobber whatever
+  // this file's own function replacement does to the same name).
+  // -------------------------------------------------------------------
+
+  test('a separate lock_listing_location_fields function exists, not merged into lock_listing_admin_fields', () => {
+    assert.match(sql, /create or replace function public\.lock_listing_location_fields\(\)/);
+  });
+
+  test("the location-fields function's INSERT branch sets all five columns to their true defaults", () => {
+    const fnSection = sql.slice(sql.indexOf('create or replace function public.lock_listing_location_fields'));
+    const insertBranch = fnSection.slice(fnSection.indexOf("TG_OP = 'INSERT'"), fnSection.indexOf('else'));
+    assert.match(insertBranch, /new\.location_source := 'unknown';/);
+    assert.match(insertBranch, /new\.location_confidence := 'unknown';/);
+    assert.match(insertBranch, /new\.location_verified_at := null;/);
+    assert.match(insertBranch, /new\.location_verified_by := null;/);
+    assert.match(insertBranch, /new\.provider_place_ids := '\{\}'::jsonb;/);
+  });
+
+  test("the location-fields function's UPDATE branch still guards all five columns (revert-to-old, not a default)", () => {
+    const fnSection = sql.slice(sql.indexOf('create or replace function public.lock_listing_location_fields'));
+    const updateBranch = fnSection.slice(fnSection.indexOf('else'), fnSection.indexOf('$$;'));
+    for (const col of ['location_source', 'location_confidence', 'location_verified_at', 'location_verified_by', 'provider_place_ids']) {
+      assert.match(updateBranch, new RegExp(`new\\.${col} is distinct from old\\.${col}`), `expected the UPDATE branch to guard ${col}`);
+    }
+  });
+
+  test('the location-fields function is guarded by the same service_role exemption as every other lock', () => {
+    const fnSection = sql.slice(
+      sql.indexOf('create or replace function public.lock_listing_location_fields'),
+      sql.indexOf('$$;', sql.indexOf('create or replace function public.lock_listing_location_fields'))
+    );
+    assert.match(fnSection, /auth\.role\(\) <> 'service_role'/);
+  });
+
+  test('a BEFORE INSERT OR UPDATE trigger wires the function up on listings', () => {
+    assert.match(
+      sql,
+      /create trigger listings_lock_location_fields\s+before insert or update on public\.listings/
+    );
   });
 
   test('exactly 7 known production place_ids are backfilled, matching the real state file', () => {
