@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Beggars Map is currently a single-route SPA (see CTO audit finding K —
+  "one indexable URL"), so this sitemap honestly reflects that: one entry,
+  not a fabricated set of pages that don't exist. If per-area or
+  per-listing pages are ever built (remediation plan P8-6, explicitly not
+  started), this file is where they'd be added — generated from real
+  listing data at build/deploy time, not hand-maintained.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.beggarsmap.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

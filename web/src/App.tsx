@@ -13,6 +13,7 @@ import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
 import AboutModal from './components/AboutModal';
 import type { Listing } from './types';
+import { trackEvent } from './lib/analytics';
 
 type ListingWithVotes = Listing & { voteCount: number };
 // Mirrors native mobile's own ListingWithDistance (src/screens/MapScreen.tsx)
@@ -872,6 +873,7 @@ export default function App() {
   // makes "tapping a list row opens the same info as tapping a pin" actually
   // true in practice, not just in theory.
   function selectListingCore(id: string) {
+    trackEvent('listing viewed');
     setSelectedListingId(id);
     setSearchPin(null);
     if (isMobilePortrait) setSheetState('map');
@@ -992,6 +994,7 @@ export default function App() {
   }, [hasOpenState]);
 
   function handlePosted() {
+    trackEvent('listing submitted');
     resetToHome();
     load();
   }
@@ -1051,6 +1054,7 @@ export default function App() {
       return;
     }
     setAddInitialCoords({ lat: searchPin.lat, lon: searchPin.lng });
+    trackEvent('Add Listing opened');
     setShowAdd(true);
     setSearchPin(null);
   }
@@ -1071,6 +1075,7 @@ export default function App() {
   // location manually either way.
   function addSearchedPlace() {
     if (areaCenter) setAddInitialCoords({ lat: areaCenter.lat, lon: areaCenter.lon });
+    trackEvent('Add Listing opened');
     setShowAdd(true);
     setSearchPin(null);
   }
@@ -1252,7 +1257,15 @@ export default function App() {
               {pickingLocation ? (
                 <button className="secondary-button map-picking-cancel picking-fade-in" onClick={cancelPickingLocation}>Cancel</button>
               ) : (
-                <button className="primary-button contribute-button" onClick={() => setShowAdd(true)}>+ Add</button>
+                <button
+                  className="primary-button contribute-button"
+                  onClick={() => {
+                    trackEvent('Add Listing opened');
+                    setShowAdd(true);
+                  }}
+                >
+                  + Add
+                </button>
               )}
             </div>
 

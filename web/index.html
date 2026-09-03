@@ -5,6 +5,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>Beggars Map — Affordable Eats in Bengaluru</title>
     <meta name="description" content="Crowdsourced map of affordable eats in Bengaluru, ₹100 or under. No login needed to browse or post." />
+
+    <!-- www.beggarsmap.com is the canonical origin — beggarsmap.com (apex)
+         308-redirects to it (confirmed live), so this must match the
+         redirect target, not the domain a visitor might type. -->
+    <link rel="canonical" href="https://www.beggarsmap.com/" />
+
+    <!-- Open Graph (WhatsApp/Facebook/iMessage/Slack link previews) and
+         Twitter/X cards. Beggars Map spreads by being pasted into WhatsApp
+         groups (see AGENTS.md) — before this, every one of those pastes
+         rendered as a bare grey link with no image, which is the single
+         highest-leverage SEO/sharing fix available (CTO audit, K/L). The
+         share image is web/public/og-image.png — on-brand (the real "B"
+         mark + wordmark + accent color from Logo.tsx/styles.css), built
+         for this purpose, not a screenshot of the app itself. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Beggars Map" />
+    <meta property="og:title" content="Beggars Map — Affordable Eats in Bengaluru" />
+    <meta property="og:description" content="Crowdsourced map of affordable eats in Bengaluru, ₹100 or under. No login needed to browse or post." />
+    <meta property="og:url" content="https://www.beggarsmap.com/" />
+    <meta property="og:image" content="https://www.beggarsmap.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Beggars Map — Affordable Eats in Bengaluru" />
+    <meta name="twitter:description" content="Crowdsourced map of affordable eats in Bengaluru, ₹100 or under. No login needed to browse or post." />
+    <meta name="twitter:image" content="https://www.beggarsmap.com/og-image.png" />
+
+    <!-- Google Search Console / Bing Webmaster Tools ("preparation", per
+         the remediation plan's P8-2 — verification itself needs an actual
+         account, which this environment has no credentials for). robots.txt
+         and sitemap.xml (web/public/) are both already in place and are
+         the other half of what each console needs; once verified via
+         either method below, submit https://www.beggarsmap.com/sitemap.xml
+         in Search Console.
+         Option A — meta tag: request a verification code from
+         https://search.google.com/search-console (Add property ->
+         beggarsmap.com -> HTML tag), then replace the empty content=""
+         below with it.
+         Option B — DNS TXT record (works for Bing too, and covers both
+         beggarsmap.com and www in one go): usually the less brittle
+         choice for a domain already managed outside this repo.
+    <meta name="google-site-verification" content="" />
+    -->
+
+    <!-- Plausible — privacy-friendly, no cookie banner needed, free tier.
+         The script alone does nothing until beggarsmap.com is actually
+         added at https://plausible.io (or a self-hosted instance) — this
+         environment has no account to create that with. Once added,
+         events start flowing with no further code change. -->
+    <script defer data-domain="beggarsmap.com" src="https://plausible.io/js/script.js"></script>
+
     <link href="https://maps.googleapis.com" rel="preconnect" />
     <link href="https://maps.gstatic.com" rel="preconnect" crossorigin />
     <link href="https://fonts.googleapis.com" rel="preconnect" />
