@@ -278,6 +278,39 @@ export default function ListingDetail({ listingId, onBack }: Props) {
             </dd>
           </dl>
 
+          {/* Stage 2A location provenance (0015). Display-only here — this
+              is the evidence foundation, not the verification workflow, so
+              there is deliberately no edit control or "verify" action yet.
+              'unknown'/'unknown' on a pre-existing listing is the honest,
+              expected state, not a warning sign. */}
+          <h3>Location provenance</h3>
+          <dl className="admin-dl">
+            <dt>Location source</dt>
+            <dd>{listing.location_source}</dd>
+            <dt>Location confidence</dt>
+            <dd>{listing.location_confidence}</dd>
+            <dt>Location verified</dt>
+            <dd>
+              {listing.location_verified_at
+                ? `${new Date(listing.location_verified_at).toLocaleString()} by ${listing.location_verified_by ?? '—'}`
+                : '— (never independently confirmed)'}
+            </dd>
+            <dt>Provider place IDs</dt>
+            <dd>
+              {Object.keys(listing.provider_place_ids).length === 0 ? (
+                '— (none recorded)'
+              ) : (
+                <ul className="admin-provider-ids">
+                  {Object.entries(listing.provider_place_ids).map(([provider, id]) => (
+                    <li key={provider} className="admin-mono">
+                      {provider}: {id}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+          </dl>
+
           <h3>Moderation</h3>
           <div className="admin-actions">
             <button className="admin-button admin-button-small" disabled={busy === 'hide' || listing.is_hidden} onClick={() => runAction('hide')}>

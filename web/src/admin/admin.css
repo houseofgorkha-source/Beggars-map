@@ -409,6 +409,12 @@ body {
   margin: 2px 0 0;
 }
 
+.admin-provider-ids {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .admin-history-list {
   list-style: none;
   margin: 0;

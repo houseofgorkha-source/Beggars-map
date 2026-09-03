@@ -58,6 +58,16 @@ export type Listing = {
   // this from reviewed_at alone, since that would silently flag every
   // pre-existing listing as NEW again. Always trust this field.
   isNew: boolean;
+  // Stage 2A location provenance (0015) — evidence/foundation only, not a
+  // verification workflow. 'unknown' on every pre-existing listing is
+  // correct, not a bug: it means genuinely not recorded, never guessed.
+  location_source: 'user_pin' | 'device_gps' | 'ola' | 'google' | 'admin' | 'import' | 'unknown';
+  location_confidence: 'unknown' | 'low' | 'medium' | 'high' | 'human_confirmed';
+  location_verified_at: string | null;
+  location_verified_by: string | null;
+  // Provider identity only — e.g. {"google": "ChIJ...", "ola": "ola-platform:..."}.
+  // Never a permanent Google-derived coordinate (see 0015's own header for why).
+  provider_place_ids: Record<string, string>;
 };
 
 export type ListingPhoto = {
