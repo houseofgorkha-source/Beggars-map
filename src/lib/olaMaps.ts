@@ -1,5 +1,6 @@
 import { TransformRequestManager } from '@maplibre/maplibre-react-native';
 import { rankPlaces, type RankablePlace } from './placeRanking';
+import { isQueryTooShort, cacheKey, SearchCache } from './searchCache';
 
 export { bestPlaceMatch, placeTypeRank, TYPE_RANK_POI } from './placeRanking';
 
@@ -37,8 +38,23 @@ export type PlaceSuggestion = RankablePlace & {
   types: string[];
 };
 
+// Mirrors web/src/lib/olaPlaces.ts's identical mitigation (remediation
+// follow-up, 2026-09-04): mobile's searchPlaces() had no minimum length and
+// no cache at all, unlike web's — every debounced keystroke from both
+// MapScreen and PickLocationScreen fired its own OLA autocomplete request.
+// The cache/gating logic itself lives in searchCache.ts (pure, unit-tested);
+// kept as a per-platform duplicate of web's version rather than shared code,
+// matching this app's existing convention for small pieces of logic that
+// live on both platforms (see AGENTS.md's content-moderation/placeRanking
+// precedent).
+const placeCache = new SearchCache<PlaceSuggestion[]>();
+
 export async function searchPlaces(query: string, near?: MapPoint): Promise<PlaceSuggestion[]> {
-  if (!apiKey || !query.trim()) return [];
+  if (!apiKey || isQueryTooShort(query)) return [];
+
+  const key = cacheKey(query, near);
+  const cached = placeCache.get(key);
+  if (cached) return cached;
 
   const params = new URLSearchParams({ input: query, api_key: apiKey });
   if (near) params.set('location', `${near.latitude},${near.longitude}`);
@@ -60,7 +76,10 @@ export async function searchPlaces(query: string, near?: MapPoint): Promise<Plac
     }))
     .filter((p) => typeof p.latitude === 'number' && typeof p.longitude === 'number');
 
-  return rankPlaces(query, results);
+  const ranked = rankPlaces(query, results);
+  placeCache.set(key, ranked);
+
+  return ranked;
 }
 
 export function boundsForPoints(points: MapPoint[]): [number, number, number, number] | null {
