@@ -22,6 +22,7 @@ import {
   markListingUnreviewed,
 } from '../_shared/listingActions.ts';
 import { applyListingFilters, getReviewTrackingBaseline, isListingNew, ListingFilters } from '../_shared/listingFilters.ts';
+import { computeLocationProvenanceOnMove, isValidProviderPlaceIds } from '../_shared/locationProvenance.ts';
 
 const ALLOWED_UPDATE_FIELDS = [
   'name',
@@ -33,10 +34,20 @@ const ALLOWED_UPDATE_FIELDS = [
   'verification_status',
   'evidence_url',
   'evidence_date',
+  // Stage 2A — location provenance (0015). See that migration's own header
+  // for what each column means; this is schema/evidence only, not a
+  // verification workflow — nothing here enforces Google/OLA/OSM presence.
+  'location_source',
+  'location_confidence',
+  'location_verified_at',
+  'location_verified_by',
+  'provider_place_ids',
 ] as const;
 type AllowedUpdateField = (typeof ALLOWED_UPDATE_FIELDS)[number];
 
 const VALID_VERIFICATION_STATUSES = ['unverified', 'pending_review', 'human_verified', 'rejected'];
+const VALID_LOCATION_SOURCES = ['user_pin', 'device_gps', 'ola', 'google', 'admin', 'import', 'unknown'];
+const VALID_LOCATION_CONFIDENCES = ['unknown', 'low', 'medium', 'high', 'human_confirmed'];
 const VALID_SORT_COLUMNS = ['created_at', 'updated_at', 'price_rupees', 'name'];
 
 Deno.serve(async (req: Request) => {
@@ -162,6 +173,18 @@ Deno.serve(async (req: Request) => {
     ) {
       return json({ error: 'Invalid verification_status' }, 400);
     }
+    if ('location_source' in body.fields && !VALID_LOCATION_SOURCES.includes(body.fields.location_source as string)) {
+      return json({ error: 'Invalid location_source' }, 400);
+    }
+    if (
+      'location_confidence' in body.fields &&
+      !VALID_LOCATION_CONFIDENCES.includes(body.fields.location_confidence as string)
+    ) {
+      return json({ error: 'Invalid location_confidence' }, 400);
+    }
+    if ('provider_place_ids' in body.fields && !isValidProviderPlaceIds(body.fields.provider_place_ids)) {
+      return json({ error: 'provider_place_ids must be an object of string values, e.g. {"google": "ChIJ..."}' }, 400);
+    }
 
     const { data: before, error: beforeError } = await adminClient
       .from('listings')
@@ -171,7 +194,13 @@ Deno.serve(async (req: Request) => {
     if (beforeError) return json({ error: beforeError.message }, 500);
     if (!before) return json({ error: 'Listing not found' }, 404);
 
-    const update = { ...body.fields, last_modified_by: adminEmail };
+    // See computeLocationProvenanceOnMove's own doc comment for the full
+    // reasoning: moving the pin without saying why is itself the provenance
+    // event, but an explicit location_source/confidence/etc. in the same
+    // payload always wins over this default.
+    const locationProvenanceFields = computeLocationProvenanceOnMove(body.fields, adminEmail);
+
+    const update = { ...body.fields, ...locationProvenanceFields, last_modified_by: adminEmail };
     const { error: updateError } = await adminClient.from('listings').update(update).eq('id', body.listingId);
     if (updateError) return json({ error: updateError.message }, 400);
 
