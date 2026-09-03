@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { supabase } from './lib/supabase';
 import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPlaces';
+import { placeTypeRank, TYPE_RANK_POI } from './lib/placeRanking';
 import { formatRelativeTime } from './lib/relativeTime';
 import { distanceKm } from './lib/distance';
 import MapView from './components/MapView';
@@ -408,12 +409,19 @@ export default function App() {
   // query text (confirmed live: "Juicy Spot" biased at Bengaluru center
   // returned an unrelated street address as prediction #1, with the actual
   // "Juicy SPOT" restaurant only at #2, which used to make the area-match
-  // radius check below run against the wrong point entirely). Falls back to
-  // results[0] only when nothing clears bestPlaceMatch's similarity bar, so
-  // a query that only resolves on proximity grounds still gets a center.
+  // radius check below run against the wrong point entirely).
+  //
+  // The fallback, for a query that clears nothing on name and would otherwise
+  // only resolve on proximity grounds, is the first prediction that is an
+  // actual POI rather than a street-address artifact — NOT results[0]. Taking
+  // results[0] here used to hand back exactly the artifact bestPlaceMatch had
+  // just refused, putting the area-match center up to a kilometre off.
   async function resolveAreaMatches(q: string, near: { lat: number; lon: number }) {
     const results = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
-    const top = bestPlaceMatch(q, results) ?? results[0];
+    const top =
+      bestPlaceMatch(q, results) ??
+      results.find((r) => placeTypeRank(r.types) === TYPE_RANK_POI) ??
+      results[0];
     const center = top ? { lat: top.latitude, lon: top.longitude } : null;
     const nearby = center
       ? listingsWithDistance.filter((l) => distanceKm(center.lat, center.lon, l.latitude, l.longitude) <= AREA_MATCH_RADIUS_KM)
