@@ -1,6 +1,22 @@
 import { supabase } from './supabase';
+import { extractGoogleCoordsFromUrl } from './extractGoogleCoords';
 
-export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: number; longitude: number } | null> {
+export { extractGoogleCoordsFromUrl };
+
+export type ParsedMapsLink = {
+  latitude: number;
+  longitude: number;
+  // Which provider the returned coordinate actually came from, for location
+  // provenance (Stage 2A, 0015) — 'google' when it was extracted directly
+  // from the URL itself (Google's own embedded coordinate, via a redirect or
+  // the original link — see extractGoogleCoords.ts), 'ola' when the
+  // share.google fallback resolved it through OLA's places search instead
+  // (see the branch below). Never inferred after the fact — each return
+  // statement already knows which case it is.
+  source: 'google' | 'ola';
+};
+
+export async function parseGoogleMapsUrl(rawUrl: string): Promise<ParsedMapsLink | null> {
   let url = rawUrl.trim();
   if (!url) return null;
 
@@ -24,7 +40,10 @@ export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: nu
       );
       if (error) return null;
       if (typeof data?.latitude === 'number' && typeof data?.longitude === 'number') {
-        return { latitude: data.latitude, longitude: data.longitude };
+        // The OLA-places-search fallback branch — see resolve-maps-link's own
+        // header for why this coordinate is OLA's, not Google's, despite the
+        // link being a Google share link.
+        return { latitude: data.latitude, longitude: data.longitude, source: 'ola' };
       }
       if (!data?.finalUrl) return null;
       url = data.finalUrl;
@@ -33,14 +52,5 @@ export async function parseGoogleMapsUrl(rawUrl: string): Promise<{ latitude: nu
     }
   }
 
-  const atMatch = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-  if (atMatch) return { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) };
-
-  const qMatch = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
-  if (qMatch) return { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) };
-
-  const dMatch = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-  if (dMatch) return { latitude: parseFloat(dMatch[1]), longitude: parseFloat(dMatch[2]) };
-
-  return null;
+  return extractGoogleCoordsFromUrl(url);
 }
