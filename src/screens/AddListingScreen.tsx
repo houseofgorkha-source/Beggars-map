@@ -14,6 +14,13 @@ import type { RootStackParamList } from '../navigation/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type AddListingRoute = RouteProp<RootStackParamList, 'AddListing'>;
 
+// Location provenance (Stage 2A, 0015) — how `coords` was actually obtained.
+// Unlike web, mobile applies a raw GPS fix directly with no map-confirmation
+// step, so 'device_gps' is a genuine, distinct case here (see
+// useCurrentLocation below) rather than something the UX never actually
+// produces.
+type LocationSource = 'user_pin' | 'device_gps' | 'ola' | 'google' | 'unknown';
+
 export default function AddListingScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<AddListingRoute>();
@@ -23,17 +30,22 @@ export default function AddListingScreen() {
   const [note, setNote] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [locationSource, setLocationSource] = useState<LocationSource>('unknown');
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
 
-  // Picked-on-map location comes back as route params — apply it once, then clear.
+  // Picked-on-map location comes back as route params — apply it once, then
+  // clear. Covers both PickLocationScreen's own confirm button and
+  // MapScreen's long-press-to-add shortcut; both are an explicit human tap on
+  // the map, so 'user_pin' is correct for either origin.
   useFocusEffect(
     useCallback(() => {
       if (params?.pickedLatitude != null && params?.pickedLongitude != null) {
         setCoords({ lat: params.pickedLatitude, lon: params.pickedLongitude });
+        setLocationSource('user_pin');
         navigation.setParams({ pickedLatitude: undefined, pickedLongitude: undefined });
       }
     }, [params?.pickedLatitude, params?.pickedLongitude, navigation])
@@ -49,6 +61,9 @@ export default function AddListingScreen() {
       }
       const pos = await Location.getCurrentPositionAsync({});
       setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      // Applied directly with no map-confirmation step — genuinely
+      // unconfirmed raw device GPS, unlike web's equivalent flow.
+      setLocationSource('device_gps');
     } finally {
       setLocating(false);
     }
@@ -71,6 +86,7 @@ export default function AddListingScreen() {
         return;
       }
       setCoords({ lat: parsed.latitude, lon: parsed.longitude });
+      setLocationSource(parsed.source);
       setMapsLink('');
     } finally {
       setParsingLink(false);
@@ -137,6 +153,9 @@ export default function AddListingScreen() {
         photo_url: photo?.url ?? null,
         latitude: coords.lat,
         longitude: coords.lon,
+        // Stage 2A location provenance (0015) — set at every point above
+        // that changes `coords`, never inferred here at submit time.
+        location_source: locationSource,
       });
 
       if (error) {

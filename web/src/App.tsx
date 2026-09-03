@@ -228,8 +228,19 @@ export default function App() {
   const [pickingLocation, setPickingLocation] = useState(false);
   // The confirmed result of a pick, handed to AddListingModal via its
   // `pickedLocation` prop. Token-keyed (not just lat/lon) so picking the
-  // same spot twice in a row still counts as a fresh confirmation.
-  const [pickedLocation, setPickedLocation] = useState<{ lat: number; lon: number; token: number } | null>(null);
+  // same spot twice in a row still counts as a fresh confirmation. `source`
+  // carries pickingSource through so the modal can record accurate location
+  // provenance (Stage 2A, 0015) — 'current-location' means this pin started
+  // from a GPS fix the user then confirmed on the map (still a human
+  // confirmation of the exact point, but worth distinguishing from a cold
+  // manual placement), 'manual' means the user picked the spot with no GPS
+  // fix involved at all.
+  const [pickedLocation, setPickedLocation] = useState<{
+    lat: number;
+    lon: number;
+    token: number;
+    source: 'manual' | 'current-location';
+  } | null>(null);
   // Which action started picking mode — changes the explanatory dialogue's
   // copy below (a plain "tap the map" prompt vs. explicitly asking the
   // user to confirm their GPS fix before it's applied).
@@ -1032,7 +1043,7 @@ export default function App() {
   function confirmAddThisPlace() {
     if (!searchPin) return;
     if (pickingLocation) {
-      setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1 }));
+      setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1, source: pickingSource }));
       setPickingLocation(false);
       setPickingDialogDismissed(false);
       setSearchPin(null);

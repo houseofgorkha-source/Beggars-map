@@ -4,9 +4,21 @@ import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
 import { reverseGeocode } from '../lib/reverseGeocode';
 
+// Location provenance (Stage 2A, 0015) — how the coordinate this modal is
+// about to submit was actually obtained. Tracked alongside `coords` itself
+// (every setCoords-equivalent call site below sets this too) rather than
+// derived after the fact, since by submit time there's no way to reconstruct
+// which of several possible paths produced the final value.
+type LocationSource = 'user_pin' | 'device_gps' | 'ola' | 'google' | 'unknown';
+
 type Props = {
   onClose: () => void;
   onPosted: () => void;
+  // Only ever seeded by App.tsx from an OLA-resolved search result (see
+  // addSearchedPlace/confirmAddThisPlace in App.tsx) — never from a blank
+  // "+ Add" with no prior search, which passes undefined instead. This is
+  // what makes 'ola' the correct default location_source below whenever this
+  // is present at mount.
   initialCoords?: { lat: number; lon: number };
   // "Pick on map" hands off to the real full-screen map instead of an
   // embedded mini-map — this reports the modal's current location (if any)
@@ -15,7 +27,7 @@ type Props = {
   // `pickedLocation`. `source` just tells the caller which explanatory
   // copy to show ("tap the map" vs. "confirm your GPS fix").
   onPickOnMap: (current: { lat: number; lon: number } | null, source?: 'manual' | 'current-location') => void;
-  pickedLocation?: { lat: number; lon: number; token: number } | null;
+  pickedLocation?: { lat: number; lon: number; token: number; source: 'manual' | 'current-location' } | null;
   hidden?: boolean;
 };
 
@@ -34,6 +46,9 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(initialCoords ?? null);
+  // See the Props comment on initialCoords for why 'ola' is the correct
+  // starting value whenever a coordinate is already present at mount.
+  const [locationSource, setLocationSource] = useState<LocationSource>(initialCoords ? 'ola' : 'unknown');
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
   // Resolved from `coords` via reverse geocoding — a human-readable
@@ -70,6 +85,14 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   useEffect(() => {
     if (!pickedLocation) return;
     setCoords({ lat: pickedLocation.lat, lon: pickedLocation.lon });
+    // Both branches are an explicit human confirmation of this exact point on
+    // the map — 'current-location' still means the user looked at their GPS
+    // fix on the map and kept it, not that GPS was trusted blind. The
+    // distinction that matters for location_source is device_gps (raw,
+    // unconfirmed — this app never actually does that) vs user_pin (a human
+    // looked at the map and confirmed/placed the point), and this is always
+    // the latter.
+    setLocationSource('user_pin');
     setLocationMode('current');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedLocation?.token]);
@@ -141,6 +164,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
       return;
     }
     setCoords({ lat: parsed.latitude, lon: parsed.longitude });
+    setLocationSource(parsed.source);
     setMapsLink('');
   }
 
@@ -150,6 +174,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   // goes null, so there's nothing else to clean up here.
   function clearLocation() {
     setCoords(null);
+    setLocationSource('unknown');
     setError(null);
   }
 
@@ -242,6 +267,9 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           // within resolveLocationLabel's own wait window, never a
           // placeholder/fabricated value.
           location_label: resolvedLabel,
+          // Stage 2A location provenance (0015) — set at every point above
+          // that changes `coords`, never inferred here at submit time.
+          location_source: locationSource,
         })
         .select('id')
         .single();
