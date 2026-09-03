@@ -9,13 +9,6 @@ type Props = {
   listingId: string;
   onClose: () => void;
   onUpdated?: () => void;
-  // The tiny complete card layout — same data/handlers as the desktop card
-  // below, just a wholly different (much smaller) render path. Used for
-  // portrait mobile's bottom-sheet card (gated by `isMobilePortrait` in
-  // App.tsx) AND, on every other viewport, as the content of the map's own
-  // marker popup (see MapView.tsx) — the same compact card either way, just
-  // hosted in two different containers.
-  compact?: boolean;
   // Distance from the user's own location, in km — computed by the caller
   // (App.tsx, from navigator.geolocation) since this component only knows
   // its own listingId, not the viewer's position. null/undefined (no
@@ -52,6 +45,15 @@ function TrashIcon() {
   );
 }
 
+// The tiny complete card layout — used for portrait mobile's bottom-sheet
+// card (gated by `isMobilePortrait` in App.tsx) AND, on every other
+// viewport, as the content of the map's own marker popup (see MapView.tsx)
+// — the same card either way, just hosted in two different containers.
+// This used to also have a second, larger non-compact render path (a
+// `compact` prop toggled between them); that branch was verified
+// unreachable (every real call site always passed `compact`) and removed
+// — see CTO-audit cleanup item G / remediation plan P7.
+//
 // Forwards a ref to the root `.listing-cover` element so App.tsx can play a
 // "this card flew up from its spot in the list" animation (a FLIP: capture
 // the clicked list-card's position, then transform this element from that
@@ -60,7 +62,7 @@ function TrashIcon() {
 // ResizeObserver) to size the collapsed "map mode" sheet height around the
 // compact card's real rendered content.
 const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDetailModal(
-  { listingId, onClose, onUpdated, compact, distanceKm },
+  { listingId, onClose, onUpdated, distanceKm },
   ref
 ) {
   const [listing, setListing] = useState<Listing | null>(null);
@@ -138,20 +140,20 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     if (lightboxIndex !== null && lightboxIndex >= photos.length) setLightboxIndex(null);
   }, [photos, lightboxIndex]);
 
-  // The compact card's report reasons render as a small floating popover
-  // (not an inline-expanding panel — that would grow the card and force the
-  // internal scrolling the compact layout is required not to have). Closes
-  // on an outside tap, same pattern as the search-results dropdown in
-  // App.tsx.
+  // The report reasons render as a small floating popover (not an
+  // inline-expanding panel — that would grow the card and force the
+  // internal scrolling this compact layout is required not to have).
+  // Closes on an outside tap, same pattern as the search-results dropdown
+  // in App.tsx.
   useEffect(() => {
-    if (!compact || !reporting) return;
+    if (!reporting) return;
     function handlePointerDown(e: MouseEvent) {
       if (reportWrapRef.current?.contains(e.target as Node)) return;
       setReporting(false);
     }
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [compact, reporting]);
+  }, [reporting]);
 
   async function toggleVote() {
     const userId = await ensureAnonymousSession();
@@ -212,184 +214,106 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
 
   if (notFound) {
     return (
-      <div className={`listing-cover${compact ? ' listing-cover-compact' : ''}`} ref={ref}>
-        {compact ? (
-          <div className="compact-top">
-            <span className="compact-empty-text">This listing is no longer available.</span>
-            <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
-          </div>
-        ) : (
-          <>
-            <div className="modal-header">
-              <h2>Not available</h2>
-              <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
-            </div>
-            <p className="loading-text">This listing is no longer available.</p>
-          </>
-        )}
+      <div className="listing-cover listing-cover-compact" ref={ref}>
+        <div className="compact-top">
+          <span className="compact-empty-text">This listing is no longer available.</span>
+          <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
       </div>
     );
   }
 
   if (!listing) {
     return (
-      <div className={`listing-cover${compact ? ' listing-cover-compact' : ''}`} ref={ref}>
-        <p className={compact ? 'compact-empty-text' : 'loading-text'}>Loading…</p>
-      </div>
-    );
-  }
-
-  if (compact) {
-    return (
       <div className="listing-cover listing-cover-compact" ref={ref}>
-        <div className="compact-top">
-          {photos.length ? (
-            <button
-              type="button"
-              className="compact-thumb-button"
-              // The compact card is hosted inside the map's marker popup;
-              // a click here must not bubble out to the map/marker handlers
-              // underneath it.
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex(0);
-              }}
-              aria-label={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
-              title={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
-            >
-              <img src={photos[0]} alt="" className="compact-thumb" />
-              {photos.length > 1 ? <span className="photo-count-badge">{photos.length}</span> : null}
-            </button>
-          ) : null}
-          <div className="compact-top-text">
-            <div className="compact-title-row">
-              <span className="compact-title">{listing.name}</span>
-              <span className="compact-price">₹{listing.price_rupees}</span>
-            </div>
-            {listing.note ? <p className="compact-note">{listing.note}</p> : null}
-            {listing.location_label ? <p className="compact-location">{listing.location_label}</p> : null}
-          </div>
-          <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-
-        <div className="compact-footer">
-          <span className="compact-meta">
-            <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
-            {distanceKm != null ? <span className="compact-distance">{distanceKm.toFixed(1)} km away</span> : null}
-          </span>
-          <div className="compact-actions">
-            <button className={`compact-vote ${hasVoted ? 'active' : ''}`} onClick={toggleVote} aria-label="Worth it">
-              ▲ {voteCount}
-            </button>
-            <button className="compact-icon-button" onClick={openDirections} aria-label="Directions" title="Directions">
-              <DirectionsIcon />
-            </button>
-            <div className="compact-report-wrap" ref={reportWrapRef}>
-              <button
-                className="compact-icon-button compact-report-trigger"
-                onClick={toggleReporting}
-                aria-label="Report"
-                title="Report"
-              >
-                <FlagIcon />
-              </button>
-              {reporting ? (
-                <div className="compact-report-popover">
-                  {reportFeedback ? (
-                    <p className="compact-report-feedback">{reportFeedback}</p>
-                  ) : (
-                    REPORT_REASONS.map((reason) => (
-                      <button key={reason} className="compact-report-reason" onClick={() => reportListing(reason)}>
-                        {reason}
-                      </button>
-                    ))
-                  )}
-                </div>
-              ) : null}
-            </div>
-            {myUserId && listing.created_by === myUserId ? (
-              <button className="compact-icon-button compact-delete" onClick={deleteListing} aria-label="Delete my listing">
-                <TrashIcon />
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        {lightboxIndex !== null ? (
-          <PhotoLightbox
-            photos={photos}
-            startIndex={lightboxIndex}
-            listingName={listing.name}
-            onClose={() => setLightboxIndex(null)}
-          />
-        ) : null}
+        <p className="compact-empty-text">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="listing-cover" ref={ref}>
-        <div className="modal-header">
-          <h2>{listing.name}</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-
-        <div className="modal-body">
-          {photos.length ? (
-            <button
-              type="button"
-              className="detail-photo-button"
-              onClick={() => setLightboxIndex(0)}
-              aria-label={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
-              title={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
-            >
-              <img src={photos[0]} alt={listing.name} className="detail-photo" />
-              {photos.length > 1 ? <span className="photo-count-badge">{photos.length}</span> : null}
-            </button>
-          ) : null}
-
-          <div className="detail-price-row">
-            <span className="detail-price">₹{listing.price_rupees}</span>
-            {listing.note ? <span className="detail-note">{listing.note}</span> : null}
-          </div>
-          <span className="detail-posted">Posted {formatRelativeTime(listing.created_at)}</span>
-
-          <div className="detail-actions">
-            <button className={`vote-button ${hasVoted ? 'active' : ''}`} onClick={toggleVote}>
-              ▲ Worth it ({voteCount})
-            </button>
-            <button className="secondary-button" onClick={openDirections} title="Directions">Directions</button>
-            <button className="report-button" onClick={() => { setReporting(true); setReportFeedback(null); }} title="Report">Report</button>
-          </div>
-
-          {myUserId && listing.created_by === myUserId ? (
-            <button className="text-button delete-listing-button" onClick={deleteListing}>Delete my listing</button>
-          ) : null}
-
-          {reporting ? (
-            <div className="report-panel">
-              {reportFeedback ? (
-                <p className="report-feedback">{reportFeedback}</p>
-              ) : (
-                REPORT_REASONS.map((reason) => (
-                  <button key={reason} className="secondary-button" onClick={() => reportListing(reason)}>
-                    {reason}
-                  </button>
-                ))
-              )}
-              <button className="text-button" onClick={() => setReporting(false)}>Cancel</button>
-            </div>
-          ) : null}
-        </div>
-
-        {lightboxIndex !== null ? (
-          <PhotoLightbox
-            photos={photos}
-            startIndex={lightboxIndex}
-            listingName={listing.name}
-            onClose={() => setLightboxIndex(null)}
-          />
+    <div className="listing-cover listing-cover-compact" ref={ref}>
+      <div className="compact-top">
+        {photos.length ? (
+          <button
+            type="button"
+            className="compact-thumb-button"
+            // The compact card is hosted inside the map's marker popup;
+            // a click here must not bubble out to the map/marker handlers
+            // underneath it.
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIndex(0);
+            }}
+            aria-label={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+            title={photos.length > 1 ? `View all ${photos.length} photos` : 'View photo'}
+          >
+            <img src={photos[0]} alt="" className="compact-thumb" />
+            {photos.length > 1 ? <span className="photo-count-badge">{photos.length}</span> : null}
+          </button>
         ) : null}
+        <div className="compact-top-text">
+          <div className="compact-title-row">
+            <span className="compact-title">{listing.name}</span>
+            <span className="compact-price">₹{listing.price_rupees}</span>
+          </div>
+          {listing.note ? <p className="compact-note">{listing.note}</p> : null}
+          {listing.location_label ? <p className="compact-location">{listing.location_label}</p> : null}
+        </div>
+        <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+
+      <div className="compact-footer">
+        <span className="compact-meta">
+          <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
+          {distanceKm != null ? <span className="compact-distance">{distanceKm.toFixed(1)} km away</span> : null}
+        </span>
+        <div className="compact-actions">
+          <button className={`compact-vote ${hasVoted ? 'active' : ''}`} onClick={toggleVote} aria-label="Worth it">
+            ▲ {voteCount}
+          </button>
+          <button className="compact-icon-button" onClick={openDirections} aria-label="Directions" title="Directions">
+            <DirectionsIcon />
+          </button>
+          <div className="compact-report-wrap" ref={reportWrapRef}>
+            <button
+              className="compact-icon-button compact-report-trigger"
+              onClick={toggleReporting}
+              aria-label="Report"
+              title="Report"
+            >
+              <FlagIcon />
+            </button>
+            {reporting ? (
+              <div className="compact-report-popover">
+                {reportFeedback ? (
+                  <p className="compact-report-feedback">{reportFeedback}</p>
+                ) : (
+                  REPORT_REASONS.map((reason) => (
+                    <button key={reason} className="compact-report-reason" onClick={() => reportListing(reason)}>
+                      {reason}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+          {myUserId && listing.created_by === myUserId ? (
+            <button className="compact-icon-button compact-delete" onClick={deleteListing} aria-label="Delete my listing">
+              <TrashIcon />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {lightboxIndex !== null ? (
+        <PhotoLightbox
+          photos={photos}
+          startIndex={lightboxIndex}
+          listingName={listing.name}
+          onClose={() => setLightboxIndex(null)}
+        />
+      ) : null}
     </div>
   );
 });

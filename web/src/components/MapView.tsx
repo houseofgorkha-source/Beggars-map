@@ -583,7 +583,6 @@ export default function MapView({
         <div className="map-popup-anchor" style={{ transform: `translate(${popupPosition.x}px, ${popupPosition.y}px)` }}>
           <div className="map-popup-card">
             <ListingDetailModal
-              compact
               listingId={selectedListingId}
               distanceKm={selectedDistanceKm ?? null}
               onClose={() => onClosePopup?.()}

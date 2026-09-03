@@ -25,25 +25,6 @@ export function vectorStyleUrl(style: 'default-light-standard' | 'default-dark-s
   return `${OLA_BASE}/tiles/vector/v1/styles/${style}/style.json?api_key=${apiKey}`;
 }
 
-export function staticMapUrl(points: MapPoint[], width: number, height: number): string | null {
-  const apiKey = process.env.EXPO_PUBLIC_OLA_MAPS_API_KEY;
-  if (!apiKey || points.length === 0) return null;
-
-  const pad = 0.01;
-  const lats = points.map((p) => p.latitude);
-  const lngs = points.map((p) => p.longitude);
-  const minLat = Math.min(...lats) - pad;
-  const maxLat = Math.max(...lats) + pad;
-  const minLng = Math.min(...lngs) - pad;
-  const maxLng = Math.max(...lngs) + pad;
-
-  const markers = points
-    .map((p) => `marker=${p.longitude},${p.latitude}|red`)
-    .join('&');
-
-  return `${OLA_BASE}/tiles/v1/styles/default-light-standard/static/${minLng},${minLat},${maxLng},${maxLat}/${width}x${height}.png?api_key=${apiKey}&${markers}`;
-}
-
 export type PlaceSuggestion = RankablePlace & {
   placeId: string;
   name: string;
