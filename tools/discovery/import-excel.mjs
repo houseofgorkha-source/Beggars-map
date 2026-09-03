@@ -1154,12 +1154,27 @@ async function main() {
     // opted in to auto-reviewing imports. When auto-reviewing, reviewed_by
     // is the same 'discovery-pipeline' label as the rest of this row's
     // provenance, never a fabricated admin identity.
+    //
+    // location_source/location_confidence/provider_place_ids (Stage 2A,
+    // 0015): location_source is 'import', matching source/actor_type above —
+    // not 'google', even though candidate.latitude/longitude ultimately came
+    // from the Google Places API discover.mjs queried, because 'import' is
+    // this schema's way of saying "this pipeline is the provenance", the
+    // same distinction 0013 already draws for source/actor_type.
+    // location_confidence is 'medium', not 'human_confirmed': the human step
+    // that gates this import (`Menu List Under 100` = Yes in the review
+    // workbook) approves the row's PRICE qualification, not a site visit
+    // confirming this exact lat/lng — calling that human_confirmed would
+    // overclaim what was actually verified. provider_place_ids records the
+    // real Google place_id this row's own Excel data already carries (read
+    // above, used for photo matching) — a genuinely known id, not a guess.
     const insertListing =
-      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label, reviewed_at, reviewed_by) ` +
+      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label, reviewed_at, reviewed_by, location_source, location_confidence, provider_place_ids) ` +
       `values (${sqlString(SEED_USER_ID)}, ${sqlString(candidate.name)}, ${sqlString(candidate.note)}, ${candidate.price}, ` +
       `${candidate.latitude}, ${candidate.longitude}, ${sqlString(CITY)}, ${sqlString(locationLabel)}, ` +
       `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true, 'import', 'discovery_pipeline', 'discovery-pipeline', ` +
-      `${autoReview ? 'now()' : 'null'}, ${autoReview ? sqlString('discovery-pipeline') : 'null'}) ` +
+      `${autoReview ? 'now()' : 'null'}, ${autoReview ? sqlString('discovery-pipeline') : 'null'}, ` +
+      `'import', 'medium', jsonb_build_object('google', ${sqlString(candidate.place_id)}::text)) ` +
       `returning *`;
 
     const photoValues = uploaded.map((p, i) => `(${sqlString(p.url)}, ${sqlString(p.storagePath)}, ${i})`).join(', ');
