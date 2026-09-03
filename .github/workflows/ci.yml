@@ -1,0 +1,42 @@
+name: CI
+
+# Runs the pure/zero-dependency test suite, both platforms' typechecks, and
+# the web production build on every push and PR. Deliberately does NOT spin
+# up a local Supabase stack: tests/rls.test.mjs and tests/adminAuth.test.mjs
+# need a real local Postgres/PostgREST/Edge-Functions stack and skip
+# themselves gracefully (via a reachability probe) when one isn't present,
+# per their own header comments — that keeps this workflow fast and simple
+# rather than adding Docker-in-Docker CI complexity for a first pass.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  root:
+    name: Root tests + typecheck (mobile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+
+  web:
+    name: Web typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
