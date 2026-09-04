@@ -10,6 +10,7 @@ import { createListing } from '../lib/listings';
 import { useAuth } from '../lib/auth';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
+import { validateDishDrafts, MIN_DISH_PRICE, MAX_DISH_PRICE, type DishDraft } from '../lib/dishes';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -27,13 +28,24 @@ export default function AddListingScreen() {
   const { params } = useRoute<AddListingRoute>();
   const { session } = useAuth();
   const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
+  // One Dish + Price pair minimum; "Add more" appends another. The cheapest
+  // entry becomes price_rupees at submit time (see lib/dishes.ts) — that
+  // column stays the sort key and the ₹100-cap column.
+  const [dishDrafts, setDishDrafts] = useState<DishDraft[]>([{ dish: '', price: '' }]);
+  const [rating, setRating] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [locationSource, setLocationSource] = useState<LocationSource>('unknown');
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Persistent inline message under the Dish + Price fields, not
+  // Alert.alert — a popup the user has to dismiss reads as more disruptive
+  // than a mistake like a wrong price or a single-item dish name warrants,
+  // and unlike the other Alert.alert validations in this form (name,
+  // location), the price/single-item rule is one a user might trip on
+  // repeatedly while iterating on entries, not a one-off.
+  const [dishError, setDishError] = useState<string | null>(null);
 
   const [mapsLink, setMapsLink] = useState('');
   const [parsingLink, setParsingLink] = useState(false);
@@ -120,16 +132,25 @@ export default function AddListingScreen() {
     return { url: data.publicUrl, path };
   }
 
+  function updateDishDraft(index: number, patch: Partial<DishDraft>) {
+    setDishDrafts((drafts) => drafts.map((draft, i) => (i === index ? { ...draft, ...patch } : draft)));
+  }
+
   async function submit() {
     if (!session) return;
-    const priceNumber = Number(price);
+    setDishError(null);
 
     if (!name.trim()) {
       Alert.alert('Name required', 'Give this spot a name.');
       return;
     }
-    if (!priceNumber || priceNumber <= 0 || priceNumber > 100) {
-      Alert.alert('Price must be ₹100 or under', 'Beggars Map only lists spots at ₹100 or less per plate/meal.');
+    // Validates every pair — price range (₹30-₹100), that each dish reads
+    // as a qualifying complete meal (not a single item), and derives
+    // price_rupees from the cheapest entry — shared, unit-tested logic so
+    // mobile and web can't disagree about what's valid.
+    const dishCheck = validateDishDrafts(dishDrafts);
+    if (!dishCheck.ok) {
+      setDishError(dishCheck.error);
       return;
     }
     if (!coords) {
@@ -149,7 +170,11 @@ export default function AddListingScreen() {
       const result = await createListing({
         created_by: session.user.id,
         name: name.trim(),
-        price_rupees: priceNumber,
+        // Derived, not typed in: the cheapest dish. Keeps price_rupees
+        // consistent with `dishes` by construction.
+        price_rupees: dishCheck.priceRupees,
+        dishes: dishCheck.entries,
+        rating,
         note: note.trim() || null,
         photo_url: photo?.url ?? null,
         latitude: coords.lat,
@@ -180,16 +205,62 @@ export default function AddListingScreen() {
       <Text style={styles.label}>Name</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="e.g. Amma's Idli Corner" />
 
-      <Text style={styles.label}>Price (₹ per plate/meal)</Text>
-      <TextInput
-        style={styles.input}
-        value={price}
-        onChangeText={setPrice}
-        placeholder="30"
-        keyboardType="number-pad"
-      />
+      {dishDrafts.map((draft, index) => (
+        <View key={index}>
+          <View style={styles.dishEntryHead}>
+            <Text style={styles.label}>Dish{index === 0 ? ' (at least one required)' : ''}</Text>
+            {/* Only the added rows are removable — the first pair is the one
+                the listing can't exist without. */}
+            {index > 0 ? (
+              <Pressable
+                onPress={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
+                hitSlop={8}
+              >
+                <Text style={styles.dishRemove}>✕</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <TextInput
+            style={styles.input}
+            value={draft.dish}
+            onChangeText={(value) => updateDishDraft(index, { dish: value })}
+            placeholder="e.g. Masala Dosa"
+          />
 
-      <Text style={styles.label}>Note (optional)</Text>
+          <Text style={styles.label}>Price (₹ per plate/meal, ₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE})</Text>
+          <TextInput
+            style={styles.input}
+            value={draft.price}
+            onChangeText={(value) => updateDishDraft(index, { price: value })}
+            placeholder="60"
+            keyboardType="number-pad"
+          />
+        </View>
+      ))}
+      <Pressable onPress={() => setDishDrafts((drafts) => [...drafts, { dish: '', price: '' }])}>
+        <Text style={styles.addMore}>+ Add more</Text>
+      </Pressable>
+      {/* Persistent inline message, not Alert.alert — stays visible right
+          under the fields it's about until the next submit attempt. */}
+      {dishError ? <Text style={styles.dishErrorText}>{dishError}</Text> : null}
+
+      <Text style={styles.label}>Rating (optional)</Text>
+      <View style={styles.ratingRow}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Pressable
+            key={star}
+            // Tapping the currently-selected star clears the rating, so an
+            // accidental tap isn't permanent on a form with no other way to
+            // unset it.
+            onPress={() => setRating((current) => (current === star ? null : star))}
+            hitSlop={4}
+          >
+            <Text style={[styles.ratingStar, rating != null && star <= rating ? styles.ratingStarOn : null]}>★</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <Text style={styles.label}>Review (optional)</Text>
       <TextInput
         style={[styles.input, styles.multiline]}
         value={note}
@@ -258,6 +329,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
+  dishEntryHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dishRemove: { fontSize: 13, color: '#aaa', paddingHorizontal: 2 },
+  addMore: { fontSize: 13, fontWeight: '600', color: '#ec4899', marginTop: 10 },
+  dishErrorText: { color: '#a33', fontSize: 13, marginTop: 10 },
+  ratingRow: { flexDirection: 'row', gap: 2 },
+  ratingStar: { fontSize: 26, color: '#ddd', paddingHorizontal: 2 },
+  ratingStarOn: { color: '#ec4899' },
   photoButton: {
     borderWidth: 1,
     borderColor: '#ddd',

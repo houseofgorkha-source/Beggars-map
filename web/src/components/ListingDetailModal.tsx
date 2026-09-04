@@ -3,6 +3,8 @@ import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { fetchListing, fetchVoteCount, hasUserVoted, toggleVote as toggleVoteRequest, reportListing as reportListingRequest, deleteListing as deleteListingRequest } from '../lib/listings';
 import { formatRelativeTime } from '../lib/relativeTime';
 import PhotoLightbox from './PhotoLightbox';
+import ReviewOverlay from './ReviewOverlay';
+import { parseDishes, formatDishes } from '../lib/dishes';
 import type { Listing, ListingPhoto } from '../types';
 
 type Props = {
@@ -71,6 +73,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   // working untouched. See `photos` below for how the two are merged.
   const [extraPhotos, setExtraPhotos] = useState<ListingPhoto[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [showReview, setShowReview] = useState(false);
   const [voteCount, setVoteCount] = useState(0);
   const [hasVoted, setHasVoted] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -133,6 +136,12 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
     }
     return urls;
   }, [listing?.photo_url, extraPhotos]);
+
+  // Plain-language rendering of the structured dish entries, derived here
+  // and never persisted — the stored array stays the single source of truth.
+  // Empty string for any listing without dishes (everything created before
+  // 0020), which the render below treats as "fall back to today's display".
+  const dishText = useMemo(() => formatDishes(parseDishes(listing?.dishes)), [listing?.dishes]);
 
   // A listing whose photos changed underneath an open viewer (or which had
   // none to begin with) must not leave the viewer pointing at nothing.
@@ -257,7 +266,17 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
             <span className="compact-title">{listing.name}</span>
             <span className="compact-price">₹{listing.price_rupees}</span>
           </div>
-          {listing.note ? <p className="compact-note">{listing.note}</p> : null}
+          {/* Dishes are the primary content here, rendered as a plain
+              sentence derived from the structured entries — never a table,
+              and never stored pre-formatted (see lib/dishes.ts). A listing
+              created before 0020 has no dish breakdown, so this slot keeps
+              showing exactly what it shows today (the note), which is what
+              makes every pre-existing listing render unchanged. */}
+          {dishText ? (
+            <p className="compact-note">{dishText}</p>
+          ) : listing.note ? (
+            <p className="compact-note">{listing.note}</p>
+          ) : null}
           {listing.location_label ? <p className="compact-location">{listing.location_label}</p> : null}
         </div>
         <button className="compact-close" onClick={onClose} aria-label="Close">✕</button>
@@ -266,6 +285,27 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
       <div className="compact-footer">
         <span className="compact-meta">
           <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
+          {/* Added into the existing inline meta row, not as new rows, so
+              the popup card keeps its current height and shape. Both are
+              omitted when the listing has neither. */}
+          {listing.rating != null ? (
+            <span className="compact-rating" aria-label={`Rated ${listing.rating} out of 5`}>
+              {'★'.repeat(listing.rating)}
+            </span>
+          ) : null}
+          {listing.note ? (
+            <button
+              className="compact-review-link"
+              onClick={(e) => {
+                // This card sits inside the map's marker popup — a click
+                // must not bubble out to the map/marker handlers beneath.
+                e.stopPropagation();
+                setShowReview(true);
+              }}
+            >
+              Review
+            </button>
+          ) : null}
           {distanceKm != null ? <span className="compact-distance">{distanceKm.toFixed(1)} km away</span> : null}
         </span>
         <div className="compact-actions">
@@ -312,6 +352,15 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
           startIndex={lightboxIndex}
           listingName={listing.name}
           onClose={() => setLightboxIndex(null)}
+        />
+      ) : null}
+
+      {showReview && listing.note ? (
+        <ReviewOverlay
+          listingName={listing.name}
+          review={listing.note}
+          rating={listing.rating}
+          onClose={() => setShowReview(false)}
         />
       ) : null}
     </div>

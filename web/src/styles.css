@@ -1044,12 +1044,31 @@ body {
 .compact-posted {
   color: #aaa;
   font-size: 11px;
-  flex-shrink: 0;
+  /* Was flex-shrink:0 (never shrinks). Rating/Review (added later in this
+     file) are also flex-shrink:0, and the row's fixed width can't fit all
+     four items — confirmed live: with nothing willing to shrink, the
+     container's overflow:hidden just hard-clipped whatever came last in DOM
+     order ("Review" rendered as "Revi", no ellipsis, since text-overflow
+     has no effect on a flex container's own overflow). Rating/Review are
+     the ones this feature actually needs visible, so posted-time/distance
+     (already-existing, lower-stakes info) become the ones that shrink and
+     ellipsize gracefully instead — same total row footprint, no card
+     dimension change, just a real "…" instead of a silently mangled word. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .compact-distance {
   color: #aaa;
   font-size: 11px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .compact-distance::before {
@@ -2438,4 +2457,178 @@ body {
   .list-panel-outer {
     width: 380px;
   }
+}
+
+/* ---- Dish + price entries, rating, and the review reader (0020) ----
+   Deliberately additive: the star rating and "Review" link below slot into
+   the cards' EXISTING inline meta rows (.list-card-meta / .compact-meta),
+   sized to match their existing siblings, so no card changes shape, height
+   or spacing. Nothing here restyles a card itself. */
+
+.dish-entry {
+  border-left: 2px solid var(--pink-accent-soft);
+  padding-left: 10px;
+  margin-top: 4px;
+}
+
+.dish-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dish-remove {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.dish-remove:hover {
+  color: #a33;
+}
+
+.dish-add-more {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pink-accent);
+  cursor: pointer;
+}
+
+.rating-input {
+  display: flex;
+  gap: 2px;
+}
+
+.rating-star {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 22px;
+  line-height: 1;
+  color: #ddd;
+  cursor: pointer;
+}
+
+.rating-star-on {
+  color: var(--pink-accent);
+}
+
+/* Card rating/review — font sizes match .list-card-votes (12px) and
+   .compact-posted (11px) exactly so they sit on the same baseline as the
+   items already in those rows. */
+.list-card-rating {
+  color: var(--pink-accent);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.compact-rating {
+  color: var(--pink-accent);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.list-card-review-link,
+.compact-review-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--pink-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+
+.list-card-review-link {
+  font-size: 12px;
+}
+
+.compact-review-link {
+  font-size: 11px;
+}
+
+.list-card-rating::before,
+.list-card-review-link::before,
+.compact-rating::before,
+.compact-review-link::before {
+  content: '·';
+  margin-right: 5px;
+  color: #bbb;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+/* Same portal-to-body treatment as .photo-lightbox, for the same documented
+   stacking reason — see ReviewOverlay.tsx / PhotoLightbox.tsx. */
+.review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 24px 16px;
+}
+
+.review-overlay-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-width: min(420px, 92vw);
+  width: 100%;
+}
+
+.review-overlay-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-overlay-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #222;
+}
+
+.review-overlay-rating {
+  color: var(--pink-accent);
+  font-size: 14px;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.review-overlay-text {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #444;
+  white-space: pre-wrap;
+}
+
+.review-overlay-close {
+  margin-top: 16px;
+  width: 100%;
+  padding: 9px;
+  border: none;
+  border-radius: 8px;
+  background: #f2f2f2;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
 }

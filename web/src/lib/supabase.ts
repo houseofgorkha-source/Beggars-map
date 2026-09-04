@@ -22,7 +22,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // isn't a style preference, an unrestricted `*` query fails outright with
 // "permission denied for table listings" under a column-level grant.
 export const PUBLIC_LISTING_COLUMNS =
-  'id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label';
+  'id,created_by,name,note,price_rupees,photo_url,latitude,longitude,city,created_at,location_label,dishes,rating';
 
 let anonymousSessionPromise: Promise<string | null> | null = null;
 

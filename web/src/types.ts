@@ -22,6 +22,14 @@ export type Listing = {
   // fabricated when geocoding can't resolve anything useful. latitude/
   // longitude remain the authoritative location; this is display-only.
   location_label: string | null;
+  // Structured dish/price entries (migration 0020) — the source of truth for
+  // what this place sells and at what price. `null` on every listing created
+  // before that migration; those keep showing price_rupees alone. Typed as
+  // unknown because it arrives as raw jsonb — always read it through
+  // parseDishes() in lib/dishes.ts rather than casting.
+  dishes: unknown;
+  // The submitter's own 1-5 star rating, or null if they didn't rate it.
+  rating: number | null;
 };
 
 export type ListingPhoto = {

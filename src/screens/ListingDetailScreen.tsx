@@ -9,6 +9,8 @@ import { fetchListing, fetchVoteCount, hasUserVoted, toggleVote as toggleVoteReq
 import { useAuth } from '../lib/auth';
 import { vectorStyleUrl, boundsForPoints } from '../lib/olaMaps';
 import { reverseGeocode } from '../lib/geocoding';
+import { parseDishes, formatDishes } from '../lib/dishes';
+import ReviewModal from '../components/ReviewModal';
 import type { RootStackParamList } from '../navigation/types';
 import type { Listing } from '../types/database';
 
@@ -27,6 +29,7 @@ export default function ListingDetailScreen() {
   const [hasVoted, setHasVoted] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [showReview, setShowReview] = useState(false);
 
   const load = useCallback(async () => {
     // None of these depend on each other's results, so run them concurrently
@@ -155,6 +158,11 @@ export default function ListingDetailScreen() {
 
   const styleUrl = vectorStyleUrl();
   const bounds = boundsForPoints([{ latitude: listing.latitude, longitude: listing.longitude }]);
+  // Derived here, never persisted — the stored dish array stays the single
+  // source of truth. Empty for any listing without dishes (everything from
+  // before this feature), which the render above treats as "fall back to
+  // the note".
+  const dishText = formatDishes(parseDishes(listing.dishes));
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -192,7 +200,29 @@ export default function ListingDetailScreen() {
         <Text style={styles.price}>₹{listing.price_rupees}</Text>
       </View>
 
-      {listing.note ? <Text style={styles.note}>{listing.note}</Text> : null}
+      {/* Dishes render as a plain sentence derived from the structured
+          entries — never a table, never stored pre-formatted (see
+          lib/dishes.ts). A listing from before this feature has no dish
+          breakdown, so it keeps showing exactly what it shows today (the
+          note). */}
+      {dishText ? (
+        <Text style={styles.note}>{dishText}</Text>
+      ) : listing.note ? (
+        <Text style={styles.note}>{listing.note}</Text>
+      ) : null}
+
+      {listing.rating != null || listing.note ? (
+        <View style={styles.ratingReviewRow}>
+          {listing.rating != null ? (
+            <Text style={styles.ratingReviewStars}>{'★'.repeat(listing.rating)}</Text>
+          ) : null}
+          {listing.note ? (
+            <Pressable onPress={() => setShowReview(true)} hitSlop={6}>
+              <Text style={styles.reviewLink}>Review</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.actionsRow}>
         <Pressable style={[styles.voteButton, hasVoted && styles.voteButtonActive]} onPress={toggleVote}>
@@ -213,6 +243,14 @@ export default function ListingDetailScreen() {
           <Text style={styles.deleteListingButtonText}>Delete my listing</Text>
         </Pressable>
       ) : null}
+
+      <ReviewModal
+        visible={showReview}
+        listingName={listing.name}
+        review={listing.note ?? ''}
+        rating={listing.rating}
+        onClose={() => setShowReview(false)}
+      />
     </ScrollView>
   );
 }
@@ -258,6 +296,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', flexShrink: 1 },
   price: { fontSize: 20, fontWeight: '700', color: '#ec4899' },
   note: { color: '#555', marginTop: 8, fontSize: 15 },
+  ratingReviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  ratingReviewStars: { color: '#ec4899', fontSize: 15, letterSpacing: 1 },
+  reviewLink: { color: '#ec4899', fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
   actionsRow: { flexDirection: 'row', gap: 10, marginTop: 18 },
   voteButton: {
     flex: 1,

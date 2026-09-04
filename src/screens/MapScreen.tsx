@@ -25,6 +25,7 @@ import { fetchListings } from '../lib/listings';
 import { useAuth } from '../lib/auth';
 import { searchPlaces, type PlaceSuggestion } from '../lib/olaMaps';
 import ListingsMap from '../components/ListingsMap';
+import ReviewModal from '../components/ReviewModal';
 import type { RootStackParamList } from '../navigation/types';
 import type { Listing } from '../types/database';
 
@@ -64,6 +65,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { session, loading: authLoading } = useAuth();
   const [listings, setListings] = useState<ListingWithDistance[]>([]);
+  const [reviewListing, setReviewListing] = useState<ListingWithDistance | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
@@ -321,6 +323,17 @@ export default function MapScreen() {
                 ) : null}
                 <View style={styles.cardMeta}>
                   <Text style={styles.cardMetaText}>▲ {item.voteCount}</Text>
+                  {/* Added into the existing meta row rather than a new row,
+                      so the card keeps its current height/layout. Omitted
+                      entirely when the listing has neither. */}
+                  {item.rating != null ? (
+                    <Text style={styles.cardMetaRating}>{'★'.repeat(item.rating)}</Text>
+                  ) : null}
+                  {item.note ? (
+                    <Pressable onPress={() => setReviewListing(item)} hitSlop={6}>
+                      <Text style={styles.cardMetaReviewLink}>Review</Text>
+                    </Pressable>
+                  ) : null}
                   {item.distanceKm !== null ? (
                     <Text style={styles.cardMetaText}>{item.distanceKm.toFixed(1)} km away</Text>
                   ) : null}
@@ -360,6 +373,16 @@ export default function MapScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {reviewListing ? (
+        <ReviewModal
+          visible
+          listingName={reviewListing.name}
+          review={reviewListing.note ?? ''}
+          rating={reviewListing.rating}
+          onClose={() => setReviewListing(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -491,8 +514,22 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '600', flexShrink: 1 },
   cardPrice: { fontSize: 16, fontWeight: '700', color: '#ec4899' },
   cardNote: { color: '#555', marginTop: 4 },
-  cardMeta: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  // flexWrap: 'wrap' matters here, not just tidiness — React Native
+  // defaults flexShrink to 0 (unlike web CSS's default of 1), and this
+  // card has no overflow:hidden, so without wrap, a row that doesn't fit
+  // (vote count + rating + Review + distance all present) would render its
+  // last item bleeding past the card's own border into whatever's below it,
+  // rather than clipping or shrinking. Wrapping is the safe RN-native
+  // fallback: on the rare device/content combination too narrow to fit
+  // everything on one line, the row grows by one line instead of any
+  // content overflowing the card's edges. Mirrors web's list-card-meta,
+  // which has no overflow:hidden either and relies on the same natural
+  // flow — confirmed via real rendering that it doesn't trigger in
+  // practice at normal widths.
+  cardMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },
   cardMetaText: { color: '#888', fontSize: 13 },
+  cardMetaRating: { color: '#ec4899', fontSize: 13, letterSpacing: 0.5 },
+  cardMetaReviewLink: { color: '#ec4899', fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
   cityModalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',

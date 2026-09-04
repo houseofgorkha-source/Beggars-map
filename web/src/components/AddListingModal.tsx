@@ -4,6 +4,7 @@ import { createListing } from '../lib/listings';
 import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
 import { checkFoodRelevance } from '../lib/contentModeration';
 import { reverseGeocode } from '../lib/reverseGeocode';
+import { validateDishDrafts, MIN_DISH_PRICE, MAX_DISH_PRICE, type DishDraft } from '../lib/dishes';
 
 // Location provenance (Stage 2A, 0015) — how the coordinate this modal is
 // about to submit was actually obtained. Tracked alongside `coords` itself
@@ -40,7 +41,11 @@ const MAX_PHOTOS = 4;
 
 export default function AddListingModal({ onClose, onPosted, initialCoords, onPickOnMap, pickedLocation, hidden }: Props) {
   const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
+  // One Dish + Price pair minimum; "+ Add more" appends another. The
+  // cheapest entry becomes the listing's price_rupees at submit time (see
+  // lib/dishes.ts) — that column stays the sort key and the ₹100-cap column.
+  const [dishDrafts, setDishDrafts] = useState<DishDraft[]>([{ dish: '', price: '' }]);
+  const [rating, setRating] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
@@ -75,6 +80,12 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Kept separate from `error` so this renders persistently right under the
+  // Dish + Price fields (where the mistake actually is) rather than at the
+  // bottom of the form with everything else — a price/single-item mistake
+  // is the one error a user is likeliest to make while still looking at
+  // these fields, not after scrolling past them.
+  const [dishError, setDishError] = useState<string | null>(null);
 
   // Pushed in from App.tsx after the user places a pin on the real
   // full-screen map (see onPickOnMap below) — coords/locationMode are local
@@ -227,12 +238,21 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000))]);
   }
 
+  function updateDishDraft(index: number, patch: Partial<DishDraft>) {
+    setDishDrafts((drafts) => drafts.map((draft, i) => (i === index ? { ...draft, ...patch } : draft)));
+  }
+
   async function submit() {
     setError(null);
-    const priceNumber = Number(price);
+    setDishError(null);
 
     if (!name.trim()) return setError('Give this spot a name.');
-    if (!priceNumber || priceNumber <= 0 || priceNumber > 100) return setError('Price must be ₹100 or under.');
+    // Validates every pair — price range (₹30-₹100), that each dish reads
+    // as a qualifying complete meal (not a single item), and derives
+    // price_rupees from the cheapest entry — all in shared, unit-tested
+    // logic so web and mobile can't disagree about what's valid.
+    const dishCheck = validateDishDrafts(dishDrafts);
+    if (!dishCheck.ok) return setDishError(dishCheck.error);
     if (!coords) return setError('Set a location using one of the options below.');
     const foodCheck = checkFoodRelevance(name, note);
     if (!foodCheck.ok) {
@@ -252,7 +272,11 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
       const insertResult = await createListing({
         created_by: userId,
         name: name.trim(),
-        price_rupees: priceNumber,
+        // Derived, not typed in: the cheapest dish. Keeps price_rupees
+        // consistent with `dishes` by construction.
+        price_rupees: dishCheck.priceRupees,
+        dishes: dishCheck.entries,
+        rating,
         note: note.trim() || null,
         // First photo doubles as the single `photo_url` every other
         // consumer (list card, map popup, listing detail, mobile app)
@@ -319,18 +343,73 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           <label className="field-label">Name</label>
           <input className="text-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amma's Idli Corner" />
 
-          <label className="field-label">Price (₹ per plate/meal, max ₹100)</label>
-          <input
-            className="text-input"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="30"
-            type="number"
-            min={1}
-            max={100}
-          />
+          {dishDrafts.map((draft, index) => (
+            <div className="dish-entry" key={index}>
+              <div className="dish-entry-head">
+                <label className="field-label">Dish{index === 0 ? ' (at least one required)' : ''}</label>
+                {/* Only the added rows are removable — the first pair is the
+                    one the listing can't exist without. */}
+                {index > 0 ? (
+                  <button
+                    type="button"
+                    className="dish-remove"
+                    onClick={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
+                    aria-label={`Remove dish ${index + 1}`}
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </div>
+              <input
+                className="text-input"
+                value={draft.dish}
+                onChange={(e) => updateDishDraft(index, { dish: e.target.value })}
+                placeholder="e.g. Masala Dosa"
+              />
 
-          <label className="field-label">Note (optional)</label>
+              <label className="field-label">Price (₹ per plate/meal, ₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE})</label>
+              <input
+                className="text-input"
+                value={draft.price}
+                onChange={(e) => updateDishDraft(index, { price: e.target.value })}
+                placeholder="60"
+                type="number"
+                min={MIN_DISH_PRICE}
+                max={MAX_DISH_PRICE}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className="dish-add-more"
+            onClick={() => setDishDrafts((drafts) => [...drafts, { dish: '', price: '' }])}
+          >
+            + Add more
+          </button>
+          {/* Persistent inline message, not a toast — stays visible right
+              under the fields it's about until the next submit attempt. */}
+          {dishError ? <div className="error-text">{dishError}</div> : null}
+
+          <label className="field-label">Rating (optional)</label>
+          <div className="rating-input" role="group" aria-label="Rating out of 5">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                type="button"
+                key={star}
+                // Tapping the currently-selected star clears the rating, so
+                // an accidental tap isn't permanent on a form with no other
+                // way to unset it.
+                onClick={() => setRating((current) => (current === star ? null : star))}
+                className={`rating-star${rating != null && star <= rating ? ' rating-star-on' : ''}`}
+                aria-label={`${star} star${star > 1 ? 's' : ''}`}
+                aria-pressed={rating != null && star <= rating}
+              >
+                ★
+              </button>
+            ))}
+          </div>
+
+          <label className="field-label">Review (optional)</label>
           <textarea
             className="text-input textarea"
             value={note}

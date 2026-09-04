@@ -56,7 +56,12 @@ export async function fetchListing(id: string): Promise<{ data: Listing } | { da
 export type CreateListingInput = {
   created_by: string;
   name: string;
+  // Derived from `dishes` (the cheapest entry), never entered directly — it
+  // stays the cheapest-first sort key and the ₹100-cap column. See
+  // lib/dishes.ts and migration 0020.
   price_rupees: number;
+  dishes: { dish: string; price: number }[];
+  rating: number | null;
   note: string | null;
   photo_url: string | null;
   latitude: number;

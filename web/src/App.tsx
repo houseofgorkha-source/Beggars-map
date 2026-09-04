@@ -12,6 +12,7 @@ import AddListingModal from './components/AddListingModal';
 import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
 import AboutModal from './components/AboutModal';
+import ReviewOverlay from './components/ReviewOverlay';
 import type { Listing } from './types';
 import { trackEvent } from './lib/analytics';
 
@@ -133,6 +134,10 @@ export default function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [addInitialCoords, setAddInitialCoords] = useState<{ lat: number; lon: number } | undefined>(undefined);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  // Which listing's review is open for reading, if any. Kept here rather
+  // than per-card so the overlay is rendered once, and so opening a review
+  // never disturbs the card's own selected/unselected state.
+  const [reviewListingId, setReviewListingId] = useState<string | null>(null);
   const [legalTab, setLegalTab] = useState<'privacy' | 'terms' | null>(null);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -297,6 +302,11 @@ export default function App() {
       })),
     [listings, userLocation]
   );
+
+  // Resolved from the full list rather than captured at click time, so the
+  // open review reflects the listing's current data if it's refetched while
+  // the overlay is open, and so a listing that disappears closes it cleanly.
+  const reviewListing = reviewListingId ? listings.find((l) => l.id === reviewListingId) ?? null : null;
 
   const trimmedQuery = query.trim().toLowerCase();
 
@@ -1385,6 +1395,29 @@ export default function App() {
                     <div className="list-card-footer">
                       <span className="list-card-meta">
                         <span className="list-card-votes">▲ {listing.voteCount}</span>
+                        {/* Rating and Review slot into this existing inline
+                            meta row rather than adding rows of their own, so
+                            the card keeps its exact height and layout. Both
+                            are omitted entirely when the listing has neither
+                            — never a placeholder or an empty-state string. */}
+                        {listing.rating != null ? (
+                          <span className="list-card-rating" aria-label={`Rated ${listing.rating} out of 5`}>
+                            {'★'.repeat(listing.rating)}
+                          </span>
+                        ) : null}
+                        {listing.note ? (
+                          <button
+                            className="list-card-review-link"
+                            onClick={(e) => {
+                              // The card itself selects the listing on click;
+                              // opening the review must not also do that.
+                              e.stopPropagation();
+                              setReviewListingId(listing.id);
+                            }}
+                          >
+                            Review
+                          </button>
+                        ) : null}
                         {listing.distanceKm != null ? (
                           <span className="list-card-distance">{listing.distanceKm.toFixed(1)} km away</span>
                         ) : null}
@@ -1421,6 +1454,18 @@ export default function App() {
       ) : null}
       {legalTab ? <LegalModal initialTab={legalTab} onClose={resetToHome} /> : null}
       {showAbout ? <AboutModal onClose={resetToHome} /> : null}
+      {/* Opened by the list card's "Review" link. The map popup's compact
+          card renders its own instance (see ListingDetailModal) so that
+          MapView's props — and its documented marker-rebuild effect — stay
+          untouched. */}
+      {reviewListing && reviewListing.note ? (
+        <ReviewOverlay
+          listingName={reviewListing.name}
+          review={reviewListing.note}
+          rating={reviewListing.rating}
+          onClose={() => setReviewListingId(null)}
+        />
+      ) : null}
     </div>
   );
 }
