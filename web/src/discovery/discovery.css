@@ -1,0 +1,318 @@
+/* Reuses the admin panel's own tokens/base (body background, font, button/
+   input/select/field/badge classes) directly — this is an internal tool in
+   the same visual family as Admin, not a second design language. Importing
+   it (rather than duplicating admin.css's rules) keeps the two pages from
+   drifting apart. */
+@import '../admin/admin.css';
+
+/* ---- Dish + Price row classes, copied verbatim from web/src/styles.css ----
+   Not imported wholesale: styles.css is the PUBLIC map app's stylesheet
+   (thousands of lines of map/list/card CSS with its own body/global rules)
+   and importing all of it here risks unintended cascade conflicts with
+   admin.css's own body/global rules in this same bundle. These are the
+   exact rules AddListingModal.tsx's dish rows depend on — kept byte-for-byte
+   identical to their source so this page's dish UI never drifts from the
+   real site's, matching the copy-duplication convention this codebase
+   already uses elsewhere (content moderation, formatDishes, etc.). */
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin: 16px 0 6px;
+}
+
+.field-hint {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+}
+
+.text-input {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.error-text {
+  color: #a33;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.text-button-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--pink-accent, #ec4899);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.photo-add-link {
+  font-size: 13px;
+}
+
+.photo-thumb-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dish-entry {
+  position: relative;
+  padding-right: 22px;
+  margin-top: 4px;
+}
+
+.dish-price-labels {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.dish-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.price-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.dish-price-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.dish-field {
+  flex: 3 1 0;
+  min-width: 0;
+}
+
+.price-field {
+  flex: 1 1 0;
+  min-width: 64px;
+  max-width: 100px;
+}
+
+.dish-remove {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.dish-remove:hover {
+  color: #a33;
+}
+
+.dish-add-more {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pink-accent, #ec4899);
+  cursor: pointer;
+}
+
+/* ---- Discovery-workbench-specific layout ---- */
+
+.discovery-shell {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+}
+
+.discovery-shell-message {
+  max-width: 480px;
+  margin: 80px auto;
+  padding: 0 20px;
+  text-align: center;
+}
+
+.discovery-shell-message h1 {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.discovery-body {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+.discovery-list {
+  width: 320px;
+  flex-shrink: 0;
+}
+
+.discovery-candidate-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.discovery-candidate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.discovery-candidate-row:hover {
+  background: #fdf7fa;
+}
+
+.discovery-candidate-row-selected {
+  background: #fdecf4;
+}
+
+.discovery-candidate-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discovery-status-done {
+  color: #1a7a4a;
+  font-weight: 700;
+}
+
+.discovery-status-pending {
+  color: #bbb;
+}
+
+.discovery-list-empty {
+  padding: 16px 12px;
+  text-align: center;
+}
+
+.discovery-detail {
+  flex: 1;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.discovery-detail-empty {
+  flex: 1;
+  padding: 40px 20px;
+  text-align: center;
+  color: #999;
+}
+
+.discovery-detail-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.discovery-photos {
+  margin-top: 20px;
+}
+
+.discovery-photo-thumb {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  flex-shrink: 0;
+}
+
+.discovery-photo-paste-box {
+  width: 110px;
+  height: 110px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  font-size: 12px;
+  color: #999;
+  border: 2px dashed #ddd;
+  border-radius: 8px;
+  cursor: text;
+}
+
+.discovery-photo-paste-box:focus {
+  outline: none;
+  border-color: var(--pink-accent, #ec4899);
+  color: var(--pink-accent, #ec4899);
+}
+
+.discovery-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.discovery-dirty {
+  color: #b8860b;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.discovery-detail-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+@media (max-width: 860px) {
+  .discovery-body {
+    flex-direction: column;
+  }
+  .discovery-list {
+    width: 100%;
+  }
+}
