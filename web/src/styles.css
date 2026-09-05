@@ -2466,19 +2466,65 @@ body {
    or spacing. Nothing here restyles a card itself. */
 
 .dish-entry {
-  border-left: 2px solid var(--pink-accent-soft);
-  padding-left: 10px;
+  position: relative;
+  padding-right: 22px;
   margin-top: 4px;
 }
 
-.dish-entry-head {
+/* Dish + Price side by side on one row — dish gets most of the width since
+   it's a free-text name, price only ever needs room for 2-3 digits (₹30-100).
+   flex-basis (not a fixed px width) so this still flows comfortably down to
+   narrow phone widths inside the modal's own padding.
+
+   Two stacked flex rows (labels, then inputs) rather than one row per
+   field — the Price label is much longer than the Dish label and wraps to
+   multiple lines at this column width, so if each field were its own
+   independent label+input column, the shorter "Dish" label would leave its
+   input sitting visibly higher than Price's. Splitting into a shared
+   labels row and a shared inputs row means both inputs sit in the same
+   row regardless of how tall either label happens to wrap. */
+.dish-price-labels {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+/* The labels row is sized independently from the narrower input row below
+   it (see .price-field) — "Price (₹ per plate)*" needs to read on one line,
+   so it's sized to its own content (flex: 0 0 auto, nowrap) rather than
+   being squeezed into the input's ~64-100px column. Dish's label takes
+   whatever space is left and can still wrap normally. */
+.dish-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.price-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.dish-price-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.dish-field {
+  flex: 3 1 0;
+  min-width: 0;
+}
+
+.price-field {
+  flex: 1 1 0;
+  min-width: 64px;
+  max-width: 100px;
 }
 
 .dish-remove {
+  position: absolute;
+  top: 2px;
+  right: 0;
   background: none;
   border: none;
   padding: 0 2px;
@@ -2626,9 +2672,9 @@ body {
   padding: 9px;
   border: none;
   border-radius: 8px;
-  background: #f2f2f2;
+  background: var(--pink-accent);
   font-size: 13px;
   font-weight: 600;
-  color: #555;
+  color: #fff;
   cursor: pointer;
 }

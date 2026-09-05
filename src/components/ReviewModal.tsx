@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingVertical: 9,
     borderRadius: 8,
-    backgroundColor: '#f2f2f2',
+    backgroundColor: '#ec4899',
     alignItems: 'center',
   },
-  closeButtonText: { fontSize: 13, fontWeight: '600', color: '#555' },
+  closeButtonText: { fontSize: 13, fontWeight: '600', color: '#fff' },
 });

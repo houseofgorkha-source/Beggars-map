@@ -345,40 +345,60 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
 
           {dishDrafts.map((draft, index) => (
             <div className="dish-entry" key={index}>
-              <div className="dish-entry-head">
-                <label className="field-label">Dish{index === 0 ? ' (at least one required)' : ''}</label>
-                {/* Only the added rows are removable — the first pair is the
-                    one the listing can't exist without. */}
-                {index > 0 ? (
-                  <button
-                    type="button"
-                    className="dish-remove"
-                    onClick={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
-                    aria-label={`Remove dish ${index + 1}`}
-                  >
-                    ✕
-                  </button>
-                ) : null}
+              {/* Only the added rows are removable — the first pair is the
+                  one the listing can't exist without. Absolutely positioned
+                  in the corner (see .dish-remove) since it's no longer part
+                  of a shared header row with the Dish label. */}
+              {index > 0 ? (
+                <button
+                  type="button"
+                  className="dish-remove"
+                  onClick={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
+                  aria-label={`Remove dish ${index + 1}`}
+                >
+                  ✕
+                </button>
+              ) : null}
+              <div className="dish-price-labels">
+                <label className="field-label dish-label">Dish{index === 0 ? ' (at least one required)' : ''}</label>
+                <label className="field-label price-label">Price (₹ per plate)*</label>
               </div>
-              <input
-                className="text-input"
-                value={draft.dish}
-                onChange={(e) => updateDishDraft(index, { dish: e.target.value })}
-                placeholder="e.g. Masala Dosa"
-              />
-
-              <label className="field-label">Price (₹ per plate/meal, ₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE})</label>
-              <input
-                className="text-input"
-                value={draft.price}
-                onChange={(e) => updateDishDraft(index, { price: e.target.value })}
-                placeholder="60"
-                type="number"
-                min={MIN_DISH_PRICE}
-                max={MAX_DISH_PRICE}
-              />
+              <div className="dish-price-row">
+                <div className="dish-field">
+                  <input
+                    className="text-input"
+                    value={draft.dish}
+                    onChange={(e) => updateDishDraft(index, { dish: e.target.value })}
+                    placeholder="e.g. Masala Dosa"
+                  />
+                </div>
+                <div className="price-field">
+                  <input
+                    className="text-input"
+                    value={draft.price}
+                    onChange={(e) => updateDishDraft(index, { price: e.target.value })}
+                    placeholder="60"
+                    type="number"
+                    min={MIN_DISH_PRICE}
+                    max={MAX_DISH_PRICE}
+                  />
+                </div>
+              </div>
             </div>
           ))}
+          {/* One hint, always trailing the LAST dish row rather than being
+              anchored to row 0 specifically — so it moves down (not
+              sandwiched between rows) as more rows are added via "+ Add
+              more". Shaped like a dish-price-row itself (empty dish slot,
+              hint in the price slot) so it still lines up under the price
+              column, matching where it sat before this became a shared
+              hint. */}
+          <div className="dish-price-row">
+            <div className="dish-field" />
+            <div className="price-field">
+              <span className="field-hint">*₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE}</span>
+            </div>
+          </div>
           <button
             type="button"
             className="dish-add-more"

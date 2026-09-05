@@ -206,37 +206,60 @@ export default function AddListingScreen() {
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="e.g. Amma's Idli Corner" />
 
       {dishDrafts.map((draft, index) => (
-        <View key={index}>
-          <View style={styles.dishEntryHead}>
-            <Text style={styles.label}>Dish{index === 0 ? ' (at least one required)' : ''}</Text>
-            {/* Only the added rows are removable — the first pair is the one
-                the listing can't exist without. */}
-            {index > 0 ? (
-              <Pressable
-                onPress={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
-                hitSlop={8}
-              >
-                <Text style={styles.dishRemove}>✕</Text>
-              </Pressable>
-            ) : null}
+        <View key={index} style={styles.dishEntry}>
+          {/* Only the added rows are removable — the first pair is the one
+              the listing can't exist without. Absolutely positioned in the
+              corner since it's no longer part of a shared header row with
+              the Dish label. */}
+          {index > 0 ? (
+            <Pressable
+              style={styles.dishRemoveButton}
+              onPress={() => setDishDrafts((drafts) => drafts.filter((_, i) => i !== index))}
+              hitSlop={8}
+            >
+              <Text style={styles.dishRemove}>✕</Text>
+            </Pressable>
+          ) : null}
+          {/* Two stacked rows (labels, then inputs) rather than one row per
+              field — Dish and Price labels can wrap to different heights, so
+              splitting labels from inputs guarantees both TextInputs still
+              land on the same row regardless. */}
+          <View style={styles.dishPriceLabelsRow}>
+            <Text style={[styles.label, styles.dishLabel]}>Dish{index === 0 ? ' (at least one required)' : ''}</Text>
+            <Text style={[styles.label, styles.priceLabel]}>Price (₹ per plate)*</Text>
           </View>
-          <TextInput
-            style={styles.input}
-            value={draft.dish}
-            onChangeText={(value) => updateDishDraft(index, { dish: value })}
-            placeholder="e.g. Masala Dosa"
-          />
-
-          <Text style={styles.label}>Price (₹ per plate/meal, ₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE})</Text>
-          <TextInput
-            style={styles.input}
-            value={draft.price}
-            onChangeText={(value) => updateDishDraft(index, { price: value })}
-            placeholder="60"
-            keyboardType="number-pad"
-          />
+          <View style={styles.dishPriceRow}>
+            <View style={styles.dishField}>
+              <TextInput
+                style={styles.input}
+                value={draft.dish}
+                onChangeText={(value) => updateDishDraft(index, { dish: value })}
+                placeholder="e.g. Masala Dosa"
+              />
+            </View>
+            <View style={styles.priceField}>
+              <TextInput
+                style={styles.input}
+                value={draft.price}
+                onChangeText={(value) => updateDishDraft(index, { price: value })}
+                placeholder="60"
+                keyboardType="number-pad"
+              />
+            </View>
+          </View>
         </View>
       ))}
+      {/* One hint, always trailing the LAST dish row rather than being
+          anchored to row 0 specifically — so it moves down (not sandwiched
+          between rows) as more rows are added via "+ Add more". Shaped like
+          a dishPriceRow itself (empty dish slot, hint in the price slot) so
+          it still lines up under the price column. */}
+      <View style={styles.dishPriceRow}>
+        <View style={styles.dishField} />
+        <View style={styles.priceField}>
+          <Text style={styles.fieldHint}>*₹{MIN_DISH_PRICE}-₹{MAX_DISH_PRICE}</Text>
+        </View>
+      </View>
       <Pressable onPress={() => setDishDrafts((drafts) => [...drafts, { dish: '', price: '' }])}>
         <Text style={styles.addMore}>+ Add more</Text>
       </Pressable>
@@ -329,8 +352,27 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
-  dishEntryHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  dishRemove: { fontSize: 13, color: '#aaa', paddingHorizontal: 2 },
+  dishEntry: { position: 'relative' },
+  dishRemoveButton: { position: 'absolute', top: 2, right: 0, padding: 4 },
+  dishRemove: { fontSize: 13, color: '#aaa' },
+  // Dish + Price side by side on one row — dish gets most of the width
+  // since it's a free-text name, price only ever needs room for 2-3 digits
+  // (₹30-100). Two stacked rows (labels, then inputs) rather than one row
+  // per field, so the inputs stay aligned even when the two labels wrap to
+  // different heights — see the comment at this row's JSX usage.
+  dishPriceLabelsRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-end' },
+  // The labels row is sized independently from the narrower input row below
+  // it (see priceField) — "Price (₹ per plate)*" needs to read on one line,
+  // so it gets no flex/width constraint at all (RN's default flexGrow: 0 /
+  // flexShrink: 0 already sizes a Text to its own content) rather than being
+  // squeezed into the input's ~64-100px column. Dish's label takes whatever
+  // space is left (flex: 1) and can still wrap normally.
+  dishLabel: { flex: 1, minWidth: 0 },
+  priceLabel: {},
+  dishPriceRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  dishField: { flex: 3 },
+  priceField: { flex: 1, minWidth: 64, maxWidth: 100 },
+  fieldHint: { fontSize: 11, color: '#999', marginTop: 4 },
   addMore: { fontSize: 13, fontWeight: '600', color: '#ec4899', marginTop: 10 },
   dishErrorText: { color: '#a33', fontSize: 13, marginTop: 10 },
   ratingRow: { flexDirection: 'row', gap: 2 },

@@ -117,6 +117,42 @@ const CITY = 'Bengaluru';
 const QUALIFY_COLUMN = 'Menu List Under 100';
 const NOTES_COLUMN = 'Menu Details/Notes';
 
+// Manual Dish + Price breakdown for specific rows, keyed by place_id —
+// added 2026-09-05 to bring 3 human-reviewed candidates into the listings.
+// dishes/rating schema (migration 0020) instead of the old single free-text
+// note. This is deliberately NOT a generic "split Menu Details/Notes into
+// dishes" parser: splitting a raw menu string into distinct dish+price pairs
+// is a judgment call (see the Mathikere "moong dosa 50 55 70 75" case, which
+// needed a human decision on which number was the real price), not something
+// this script should silently guess at for arbitrary future rows. Every
+// other row's behavior (note = raw text, no dishes/rating) is completely
+// unchanged. When a place_id has an entry here: `note` is left null (these
+// are brand-new, unreviewed restaurants — no review text to show), `dishes`
+// is this exact array, and `price_rupees` is derived as MIN(dish price) so
+// it can never disagree with the structured data.
+const MANUAL_DISH_OVERRIDES = {
+  // SIDDAGANGA FAST FOOD & CATERER'S — "raagi Ball Meal 60 South Meal 60"
+  ChIJ8eY5k5s9rjsR6BrWSdXYuBQ: [
+    { dish: 'raagi Ball Meal', price: 60 },
+    { dish: 'South Meal', price: 60 },
+  ],
+  // New Shetty's Kitchen Jp nagar — "Chicken Meal 100 fish meal 90 2 chapati meal 30"
+  ChIJm4DJ8DAVrjsRLWI5luXs61g: [
+    { dish: 'Chicken Meal', price: 100 },
+    { dish: 'fish meal', price: 90 },
+    { dish: '2 chapati meal', price: 30 },
+  ],
+  // Mathikere Tiffin Center — "idli vada- 60 moong dosa 50 55 70 75 adhra meal 80".
+  // "moong dosa" carried four numbers with no way to tell from the text alone
+  // whether they were separate variants or noise — resolved by explicit
+  // instruction to keep one "moong dosa" entry at its lowest price (₹50).
+  ChIJefbVSGA9rjsRZrbOUI0DKyM: [
+    { dish: 'idli vada', price: 60 },
+    { dish: 'moong dosa', price: 50 },
+    { dish: 'adhra meal', price: 80 },
+  ],
+};
+
 const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -1008,12 +1044,18 @@ async function main() {
       continue;
     }
 
+    const dishOverride = MANUAL_DISH_OVERRIDES[placeId] ?? null;
     toImport.push({
       excelRow,
       place_id: placeId,
       name,
-      note: typeof note === 'string' ? note : null,
-      price,
+      // A dish-override row has no review yet (it's brand new), so note
+      // stays null rather than the raw menu text — see MANUAL_DISH_OVERRIDES.
+      note: dishOverride ? null : typeof note === 'string' ? note : null,
+      dishes: dishOverride,
+      // Derived from the override so it can never disagree with it; the
+      // regex-extracted `price` is only used when there's no override.
+      price: dishOverride ? Math.min(...dishOverride.map((d) => d.price)) : price,
       latitude,
       longitude,
       address: row.formatted_address ?? null,
@@ -1168,9 +1210,14 @@ async function main() {
     // overclaim what was actually verified. provider_place_ids records the
     // real Google place_id this row's own Excel data already carries (read
     // above, used for photo matching) — a genuinely known id, not a guess.
+    // dishes (0020): only set for rows with a MANUAL_DISH_OVERRIDES entry —
+    // everything else keeps dishes = null exactly as before this pass, same
+    // as any pre-0020 listing. rating is never set by this script; nothing
+    // it imports has ever been rated by anyone.
+    const dishesValue = candidate.dishes ? `${sqlString(JSON.stringify(candidate.dishes))}::jsonb` : 'null';
     const insertListing =
-      `insert into listings (created_by, name, note, price_rupees, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label, reviewed_at, reviewed_by, location_source, location_confidence, provider_place_ids) ` +
-      `values (${sqlString(SEED_USER_ID)}, ${sqlString(candidate.name)}, ${sqlString(candidate.note)}, ${candidate.price}, ` +
+      `insert into listings (created_by, name, note, price_rupees, dishes, latitude, longitude, city, location_label, photo_url, is_hidden, source, actor_type, actor_label, reviewed_at, reviewed_by, location_source, location_confidence, provider_place_ids) ` +
+      `values (${sqlString(SEED_USER_ID)}, ${sqlString(candidate.name)}, ${sqlString(candidate.note)}, ${candidate.price}, ${dishesValue}, ` +
       `${candidate.latitude}, ${candidate.longitude}, ${sqlString(CITY)}, ${sqlString(locationLabel)}, ` +
       `${uploaded.length ? sqlString(uploaded[0].url) : 'null'}, true, 'import', 'discovery_pipeline', 'discovery-pipeline', ` +
       `${autoReview ? 'now()' : 'null'}, ${autoReview ? sqlString('discovery-pipeline') : 'null'}, ` +
