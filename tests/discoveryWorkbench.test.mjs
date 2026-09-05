@@ -111,6 +111,39 @@ async function deleteFixtureRow() {
   });
 }
 
+// Cleans up any objects the photo-action tests uploaded under the fixture's
+// own prefix — service-role bulk delete, same pattern tests/workbenchSync.
+// test.mjs already uses for its own storage cleanup.
+async function deleteFixturePhotos() {
+  const res = await fetch(`${API}/storage/v1/object/list/discovery-photos`, {
+    method: 'POST',
+    headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefix: `${FIXTURE_PLACE_ID}/` }),
+  });
+  const objects = await res.json().catch(() => []);
+  if (!Array.isArray(objects) || objects.length === 0) return;
+  await fetch(`${API}/storage/v1/object/discovery-photos`, {
+    method: 'DELETE',
+    headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefixes: objects.map((o) => `${FIXTURE_PLACE_ID}/${o.name}`) }),
+  });
+}
+
+// Actually uploads bytes to a signed upload URL the function minted — PUT
+// straight to it (supabase-js's createSignedUploadUrl() already returns a
+// full absolute URL, not the bare relative path the raw REST endpoint
+// returns — confirmed directly; don't re-prefix it with the API base URL).
+// Mirrors what supabase-js's uploadToSignedUrl() does under the hood, in
+// plain fetch to match this test file's existing no-supabase-js convention.
+async function uploadToSignedUrl(signedUrl, contentType, bytes) {
+  const res = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: bytes,
+  });
+  return res;
+}
+
 async function callFn(jwt, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
@@ -135,6 +168,7 @@ describe('Discovery Workbench auth boundary + CRUD (Phase 1)', { skip: !stackRea
   });
 
   after(async () => {
+    await deleteFixturePhotos();
     await deleteFixtureRow();
   });
 
@@ -212,5 +246,109 @@ describe('Discovery Workbench auth boundary + CRUD (Phase 1)', { skip: !stackRea
       fields: { dishes: [{ dish: 'Vada', price: 10 }] },
     });
     assert.equal(status, 400);
+  });
+
+  describe('photo actions (Phase 3)', () => {
+    test('photo actions require placeId to belong to the active batch -> 404', async () => {
+      const { status } = await callFn(discoveryJwt, { action: 'createPhotoUploadUrl', placeId: 'not-a-real-place', filename: 'a.jpg' });
+      assert.equal(status, 404);
+    });
+
+    test('createPhotoUploadUrl: rejects a disallowed extension', async () => {
+      const { status, data } = await callFn(discoveryJwt, {
+        action: 'createPhotoUploadUrl',
+        placeId: FIXTURE_PLACE_ID,
+        filename: 'menu.pdf',
+      });
+      assert.equal(status, 400);
+      assert.match(data.error, /JPEG, PNG, or WebP/);
+    });
+
+    test('createPhotoUploadUrl + real upload -> listPhotos returns it with a working signed URL', async () => {
+      const { status, data } = await callFn(discoveryJwt, {
+        action: 'createPhotoUploadUrl',
+        placeId: FIXTURE_PLACE_ID,
+        filename: 'front.png',
+      });
+      assert.equal(status, 200, JSON.stringify(data));
+      assert.ok(data.data.signedUrl);
+      assert.ok(data.data.path.startsWith(`${FIXTURE_PLACE_ID}/`));
+
+      const uploadRes = await uploadToSignedUrl(data.data.signedUrl, 'image/png', Buffer.from('fake-png-bytes-1'));
+      assert.equal(uploadRes.status, 200, await uploadRes.text());
+
+      const listRes = await callFn(discoveryJwt, { action: 'listPhotos', placeId: FIXTURE_PLACE_ID });
+      assert.equal(listRes.status, 200);
+      assert.equal(listRes.data.data.length, 1);
+      assert.ok(listRes.data.data[0].url.startsWith('http'));
+
+      // The signed read URL must actually work.
+      const readRes = await fetch(listRes.data.data[0].url);
+      assert.equal(readRes.status, 200);
+      assert.equal(await readRes.text(), 'fake-png-bytes-1');
+    });
+
+    test('photo cap: a 2nd photo is allowed, a 3rd is rejected', async () => {
+      const second = await callFn(discoveryJwt, { action: 'createPhotoUploadUrl', placeId: FIXTURE_PLACE_ID, filename: 'back.png' });
+      assert.equal(second.status, 200, JSON.stringify(second.data));
+      const uploadRes = await uploadToSignedUrl(second.data.data.signedUrl, 'image/png', Buffer.from('fake-png-bytes-2'));
+      assert.equal(uploadRes.status, 200);
+
+      const third = await callFn(discoveryJwt, { action: 'createPhotoUploadUrl', placeId: FIXTURE_PLACE_ID, filename: 'side.png' });
+      assert.equal(third.status, 400);
+      assert.match(third.data.error, /Maximum 2 photos/);
+
+      // addPhotoFromUrl must respect the same cap.
+      const viaUrl = await callFn(discoveryJwt, { action: 'addPhotoFromUrl', placeId: FIXTURE_PLACE_ID, imageUrl: 'https://example.com/whatever.png' });
+      assert.equal(viaUrl.status, 400);
+      assert.match(viaUrl.data.error, /Maximum 2 photos/);
+    });
+
+    test('removePhoto: removes one, count drops back under the cap', async () => {
+      const before = await callFn(discoveryJwt, { action: 'listPhotos', placeId: FIXTURE_PLACE_ID });
+      assert.equal(before.data.data.length, 2);
+      const target = before.data.data[0].name;
+
+      const removeRes = await callFn(discoveryJwt, { action: 'removePhoto', placeId: FIXTURE_PLACE_ID, filename: target });
+      assert.equal(removeRes.status, 200, JSON.stringify(removeRes.data));
+
+      const after1 = await callFn(discoveryJwt, { action: 'listPhotos', placeId: FIXTURE_PLACE_ID });
+      assert.equal(after1.data.data.length, 1);
+      assert.ok(!after1.data.data.some((p) => p.name === target));
+
+      // Cap freed up — a new upload should now be accepted again.
+      const retry = await callFn(discoveryJwt, { action: 'createPhotoUploadUrl', placeId: FIXTURE_PLACE_ID, filename: 'side.png' });
+      assert.equal(retry.status, 200, JSON.stringify(retry.data));
+    });
+
+    test('addPhotoFromUrl: fetches and stores a real external image', async () => {
+      // Clear the slot the previous test's retry consumed so this has room
+      // (photo cap is real and shared across this describe block's tests).
+      const current = await callFn(discoveryJwt, { action: 'listPhotos', placeId: FIXTURE_PLACE_ID });
+      for (const photo of current.data.data) {
+        await callFn(discoveryJwt, { action: 'removePhoto', placeId: FIXTURE_PLACE_ID, filename: photo.name });
+      }
+
+      const res = await callFn(discoveryJwt, {
+        action: 'addPhotoFromUrl',
+        placeId: FIXTURE_PLACE_ID,
+        imageUrl: 'https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png',
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.data));
+      assert.ok(res.data.data.name.endsWith('.png'));
+
+      const listRes = await callFn(discoveryJwt, { action: 'listPhotos', placeId: FIXTURE_PLACE_ID });
+      assert.equal(listRes.data.data.length, 1);
+    });
+
+    test('addPhotoFromUrl: rejects a non-image URL', async () => {
+      const res = await callFn(discoveryJwt, {
+        action: 'addPhotoFromUrl',
+        placeId: FIXTURE_PLACE_ID,
+        imageUrl: 'https://www.google.com/robots.txt',
+      });
+      assert.equal(res.status, 400);
+      assert.match(res.data.error, /JPEG, PNG, or WebP/);
+    });
   });
 });

@@ -1,5 +1,6 @@
 // Beggars Map — Discovery Workbench sync (Phase 2 of the approved Discovery
-// Workbench plan). Moves one batch of not-yet-reviewed candidates between
+// Workbench plan). Moves one batch of eligible (Menu List Under 100 blank)
+// candidates between
 // the local WIP xlsx/photos (the permanent source of truth, per the
 // approved architecture) and Supabase's discovery_batch_rows table /
 // discovery-photos bucket (transient, one-batch-at-a-time working storage
@@ -14,12 +15,14 @@
 //
 // ============================ WORKFLOW ================================
 //   node tools/discovery/workbench-sync.mjs --status
-//     -> what's completed/in-progress/remaining, and (if a batch is active)
-//        how many of it are reviewed so far
+//     -> counts by Menu List Under 100 (Yes/No/blank), completed/in-progress/
+//        remaining-eligible, and (if a batch is active) how many of it are
+//        reviewed so far
 //   node tools/discovery/workbench-sync.mjs --push [--batch-size=50]
-//     -> selects the next N not-yet-reviewed candidates, inserts them into
-//        discovery_batch_rows, uploads their existing local photos (if any)
-//        to discovery-photos. Refuses if a batch is already active.
+//     -> selects the next N eligible candidates (Menu List Under 100 blank —
+//        see isEligibleForResearch), inserts them into discovery_batch_rows,
+//        uploads their existing local photos (if any) to discovery-photos.
+//        Refuses if a batch is already active.
 //   node tools/discovery/workbench-sync.mjs --pull
 //     -> downloads the active batch's current rows/photos, backs up the
 //        xlsx, writes the edits back into it, verifies the write. Leaves
@@ -53,11 +56,14 @@
 // between DELETE and state-save on purge). This makes every command safe
 // to interrupt and re-run at any point.
 //
-// A row already fully reviewed BY CONTENT (Number Valid set, Menu List
-// Under 100 set, and if "Yes" then Menu Details/Notes non-empty) is never
-// selected for push even if this tool has never seen it before — the real
-// WIP workbook already has a handful of rows reviewed the old manual way,
-// and those must not be re-sent to an intern for redundant review.
+// Push eligibility is a permanent scoping rule on "Menu List Under 100"
+// alone, not a workflow-progress check (see isEligibleForResearch): blank
+// means open to intern research; "No" means already excluded from Beggars
+// Map's own qualification and must never be re-offered; "Yes" means already
+// manually verified by some other means and done. "Number Valid" plays no
+// part in this decision. A row the old manual-Excel process already marked
+// "No"/"Yes" is therefore never selected for push, even if this tool has
+// never seen it before.
 //
 // Purge order is deliberately photos-then-rows, per place_id, not one bulk
 // step: if photo cleanup for a place_id fails partway, that place_id simply
@@ -205,13 +211,18 @@ function sqlNumber(value) {
 }
 
 function runSql(sql, { expectRows = false } = {}) {
-  const result = spawnSync('npx', ['supabase', 'db', 'query', '--local', JSON.stringify(sql)], {
-    encoding: 'utf8',
-    shell: true,
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    'npx',
+    ['supabase', 'db', 'query', '--local', '--output-format', 'json'],
+    {
+      input: sql,
+      encoding: 'utf8',
+      shell: true,
+      maxBuffer: 32 * 1024 * 1024,
+    }
+  );
   if (result.status !== 0) {
-    throw new Error(`"supabase db query --local" failed:\n${result.stderr || result.stdout}`);
+  throw new Error(`"supabase db query --local" failed:\n${result.error?.message || result.stderr || result.stdout}`);
   }
   if (/"_tag"\s*:\s*"Error"/.test(result.stdout)) {
     throw new Error(`"supabase db query --local" returned an error:\n${result.stdout.slice(0, 800)}`);
@@ -372,16 +383,18 @@ function reconcileState(state, liveRows) {
 
 // -------------------------------------------------------- reviewed logic
 
-function isReviewedRow(row) {
-  const numberValid = typeof row[NUMBER_VALID_COLUMN] === 'string' ? row[NUMBER_VALID_COLUMN].trim() : '';
+// Push-eligibility gate — a permanent scoping rule, not a workflow-progress
+// check: "Menu List Under 100" blank means genuinely undecided and open to
+// intern research; "No" means already excluded from Beggars Map's own
+// price-cap qualification (tools/discovery/matching.mjs's own domain, not
+// re-litigated here) and must never be re-offered; "Yes" means already
+// manually verified by some other means and done. Number Valid plays no
+// part in this decision — a row can have "Number Valid" set or blank and
+// still be exactly as eligible, since that column tracks something
+// different (whether the phone number on file is correct).
+function isEligibleForResearch(row) {
   const qualifies = typeof row[QUALIFY_COLUMN] === 'string' ? row[QUALIFY_COLUMN].trim() : '';
-  if (!numberValid) return false;
-  if (qualifies !== 'Yes' && qualifies !== 'No') return false;
-  if (qualifies === 'Yes') {
-    const notes = typeof row[NOTES_COLUMN] === 'string' ? row[NOTES_COLUMN].trim() : '';
-    if (!notes) return false;
-  }
-  return true;
+  return qualifies === '';
 }
 
 function isReviewedDbRow(row) {
@@ -417,7 +430,7 @@ async function push(xlsxPath, stateFilePath, batchSize) {
 
   const rows = readWorkbook(xlsxPath);
   const pool = rows.filter(
-    (r) => typeof r.place_id === 'string' && r.place_id.trim() && !state.completed[r.place_id] && !isReviewedRow(r)
+    (r) => typeof r.place_id === 'string' && r.place_id.trim() && !state.completed[r.place_id] && isEligibleForResearch(r)
   );
   const selected = pool.slice(0, batchSize);
 
@@ -632,18 +645,30 @@ function status(xlsxPath, stateFilePath) {
 
   const rows = readWorkbook(xlsxPath);
   const totalCandidates = rows.filter((r) => typeof r.place_id === 'string' && r.place_id.trim()).length;
-  const alreadyReviewedLegacy = rows.filter((r) => isReviewedRow(r) && !state.completed[r.place_id]).length;
+  const verifiedYes = rows.filter((r) => typeof r[QUALIFY_COLUMN] === 'string' && r[QUALIFY_COLUMN].trim() === 'Yes').length;
+  const notEligibleNo = rows.filter((r) => typeof r[QUALIFY_COLUMN] === 'string' && r[QUALIFY_COLUMN].trim() === 'No').length;
+  const eligibleBlank = rows.filter((r) => isEligibleForResearch(r)).length;
   const completedCount = Object.keys(state.completed).length;
   const inProgressCount = Object.keys(state.in_progress).length;
-  const remaining = totalCandidates - completedCount - inProgressCount - alreadyReviewedLegacy;
+  // A blank row not currently tracked as in-progress or completed — the
+  // exact same rule --push uses, checked per-row (not by subtraction) so a
+  // completed row that happens to still be blank (the owner purged before
+  // the intern actually filled anything in) is correctly excluded rather
+  // than double-subtracted or missed. "No"/"Yes" rows can never appear
+  // here, since isEligibleForResearch() already excludes them.
+  const remainingEligible = rows.filter(
+    (r) => isEligibleForResearch(r) && !state.in_progress[r.place_id] && !state.completed[r.place_id]
+  ).length;
 
   console.log(`State file                          : ${stateFilePath}`);
   console.log(`Spreadsheet                         : ${xlsxPath}`);
   console.log(`Total candidates                    : ${totalCandidates}`);
-  console.log(`Completed (pulled + purged)          : ${completedCount}`);
-  console.log(`Already reviewed (legacy, never pushed) : ${alreadyReviewedLegacy}`);
+  console.log(`Already manually verified (Yes)      : ${verifiedYes}`);
+  console.log(`Not eligible (No)                    : ${notEligibleNo}`);
+  console.log(`Eligible for research (blank)        : ${eligibleBlank}`);
   console.log(`In progress (active batch)           : ${inProgressCount}`);
-  console.log(`Remaining (eligible for next push)   : ${remaining}`);
+  console.log(`Completed (pulled + purged)          : ${completedCount}`);
+  console.log(`Remaining eligible (blank, not yet pushed/completed) : ${remainingEligible}`);
 
   if (inProgressCount > 0) {
     const batchIds = [...new Set(Object.values(state.in_progress).map((e) => e.batch_id))];

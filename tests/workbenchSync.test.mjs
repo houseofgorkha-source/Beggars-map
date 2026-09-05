@@ -59,7 +59,13 @@ function buildFixture() {
     { place_id: PLACES[2], name: 'Test Place Three (legacy reviewed)', formatted_address: '3 Test Rd, Bengaluru', latitude: 12.92, longitude: 77.62, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_MODERATE', website_uri: null, phone: '099000 00003', google_maps_uri: 'https://maps.google.com/?cid=3', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': 'No', 'Menu List Under 100': 'No', 'Menu Details/Notes': null },
     { place_id: PLACES[3], name: 'Test Place Four', formatted_address: '4 Test Rd, Bengaluru', latitude: 12.93, longitude: 77.63, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 00004', google_maps_uri: 'https://maps.google.com/?cid=4', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': null, 'Menu List Under 100': null, 'Menu Details/Notes': null },
     { place_id: PLACES[4], name: 'Test Place Five (lock test)', formatted_address: '5 Test Rd, Bengaluru', latitude: 12.94, longitude: 77.64, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 00005', google_maps_uri: 'https://maps.google.com/?cid=5', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': null, 'Menu List Under 100': null, 'Menu Details/Notes': null },
-    { place_id: PLACES[5], name: 'Test Place Six (bad enum)', formatted_address: '6 Test Rd, Bengaluru', latitude: 12.95, longitude: 77.65, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 00006', google_maps_uri: 'https://maps.google.com/?cid=6', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': 'Bogus', 'Menu List Under 100': 'Weird', 'Menu Details/Notes': null },
+    // Menu List Under 100 is blank here (not "Weird") — under the
+    // blank-only eligibility rule, a non-blank value of ANY kind (even
+    // garbage) makes a row ineligible for push, so this row's own
+    // eligibility is unaffected by "Number Valid" being invalid. This still
+    // exercises the Number Valid coercion path in push(), just not a
+    // simultaneous Menu List Under 100 one.
+    { place_id: PLACES[5], name: 'Test Place Six (bad enum)', formatted_address: '6 Test Rd, Bengaluru', latitude: 12.95, longitude: 77.65, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 00006', google_maps_uri: 'https://maps.google.com/?cid=6', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': 'Bogus', 'Menu List Under 100': null, 'Menu Details/Notes': null },
     { place_id: PLACES[6], name: 'Test Place Seven', formatted_address: '7 Test Rd, Bengaluru', latitude: 12.96, longitude: 77.66, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 00007', google_maps_uri: 'https://maps.google.com/?cid=7', discovery_sources: 'Test:query', verification_status: 'unverified', verified_le_100: false, 'Number Valid': null, 'Menu List Under 100': null, 'Menu Details/Notes': null },
   ];
 
@@ -197,13 +203,16 @@ describe('workbench-sync.mjs (Phase 2)', { skip: !stackReachable && 'local Supab
 
   const commonArgs = [`--file=${FIXTURE_XLSX}`, `--state-file=${FIXTURE_STATE}`];
 
-  test('status on a fresh fixture: 4 remaining, 1 legacy-reviewed, no active batch', () => {
+  test('status on a fresh fixture: 6 eligible (blank), 1 not-eligible (No), no active batch', () => {
     const { status, stdout, stderr } = runScript(['--status', ...commonArgs]);
     assert.equal(status, 0, stdout + stderr);
     assert.match(stdout, /Total candidates\s*: 7/);
-    assert.match(stdout, /Already reviewed \(legacy, never pushed\)\s*: 1/);
+    assert.match(stdout, /Already manually verified \(Yes\)\s*: 0/);
+    assert.match(stdout, /Not eligible \(No\)\s*: 1/);
+    assert.match(stdout, /Eligible for research \(blank\)\s*: 6/);
     assert.match(stdout, /In progress \(active batch\)\s*: 0/);
-    assert.match(stdout, /Remaining \(eligible for next push\)\s*: 6/);
+    assert.match(stdout, /Completed \(pulled \+ purged\)\s*: 0/);
+    assert.match(stdout, /Remaining eligible \(blank, not yet pushed\/completed\)\s*: 6/);
     assert.match(stdout, /No active batch\./);
   });
 
@@ -318,13 +327,18 @@ describe('workbench-sync.mjs (Phase 2)', { skip: !stackReachable && 'local Supab
     assert.match(stdout, /Nothing to pull — no active batch\./);
   });
 
-  test('status after a full cycle reflects completed/legacy/remaining correctly', () => {
+  test('status after a full cycle reflects Yes/No/blank and completed/remaining correctly', () => {
+    // At this point PLACES[0]/[1] have been pulled with the intern's real
+    // Yes/No determinations (see the pull test above), so they've moved out
+    // of "blank" for real, on top of being tracked completed.
     const { status, stdout, stderr } = runScript(['--status', ...commonArgs]);
     assert.equal(status, 0, stdout + stderr);
-    assert.match(stdout, /Completed \(pulled \+ purged\)\s*: 2/);
-    assert.match(stdout, /Already reviewed \(legacy, never pushed\)\s*: 1/);
+    assert.match(stdout, /Already manually verified \(Yes\)\s*: 1/);
+    assert.match(stdout, /Not eligible \(No\)\s*: 2/);
+    assert.match(stdout, /Eligible for research \(blank\)\s*: 4/);
     assert.match(stdout, /In progress \(active batch\)\s*: 0/);
-    assert.match(stdout, /Remaining \(eligible for next push\)\s*: 4/);
+    assert.match(stdout, /Completed \(pulled \+ purged\)\s*: 2/);
+    assert.match(stdout, /Remaining eligible \(blank, not yet pushed\/completed\)\s*: 4/);
   });
 
   test('failure/recovery: a row live in Supabase but missing from state is adopted back on the next command', async () => {
@@ -386,20 +400,21 @@ describe('workbench-sync.mjs (Phase 2)', { skip: !stackReachable && 'local Supab
     assert.match(stdout, /Purged 1 row\(s\)\./);
   });
 
-  test('push tolerates an invalid legacy dropdown value: coerces to null without blocking the rest of the batch', async () => {
-    // TEST-WBSYNC-6 has "Bogus"/"Weird" pre-filled (not valid dropdown
-    // values) and TEST-WBSYNC-7 is a normal blank row, pushed together.
+  test('push tolerates an invalid legacy Number Valid value: coerces to null without blocking the rest of the batch', async () => {
+    // TEST-WBSYNC-6 has "Bogus" pre-filled for Number Valid (not a valid
+    // dropdown value) but a BLANK Menu List Under 100 — under the
+    // blank-only eligibility rule its eligibility is unaffected by that;
+    // TEST-WBSYNC-7 is a normal blank row, pushed together.
     const { status, stdout, stderr } = runScript(['--push', '--batch-size=2', ...commonArgs]);
     assert.equal(status, 0, stdout + stderr);
     assert.match(stdout, /Pushed batch \d+: 2 candidate\(s\)/);
-    // TEST-WBSYNC-6 has both "Number Valid" and "Menu List Under 100"
-    // pre-filled with invalid values, so 2 individual values are reset, not
-    // 1 row — the count is per-value, matching what actually gets fixed.
-    assert.match(stdout, /2 legacy value\(s\) with an invalid dropdown option were reset to blank/);
+    // Only Number Valid is actually invalid here (Menu List Under 100 was
+    // already blank, which needs no coercion), so exactly 1 value is reset.
+    assert.match(stdout, /1 legacy value\(s\) with an invalid dropdown option were reset to blank/);
 
     const bad = await dbGet(PLACES[5]);
     const good = await dbGet(PLACES[6]);
-    assert.ok(bad, 'the row with invalid legacy values should still have been pushed');
+    assert.ok(bad, 'the row with an invalid legacy Number Valid should still have been pushed');
     assert.equal(bad.number_valid, null);
     assert.equal(bad.menu_list_under_100, null);
     assert.ok(good, 'the other row in the same batch must be unaffected');
@@ -407,5 +422,133 @@ describe('workbench-sync.mjs (Phase 2)', { skip: !stackReachable && 'local Supab
     // Clean up this batch so the suite ends with no active batch.
     const { status: purgeStatus, stdout: purgeOut, stderr: purgeErr } = runScript(['--pull', '--purge', ...commonArgs]);
     assert.equal(purgeStatus, 0, purgeOut + purgeErr);
+  });
+});
+
+// Dedicated, isolated suite for the "Menu List Under 100" blank-only
+// eligibility rule — its own fixture/state files (never the shared fixture
+// above) so it can't interfere with, or be affected by, the batch/state
+// sequencing the other describe block's tests depend on.
+describe('workbench-sync.mjs — Menu List Under 100 eligibility rule', { skip: !stackReachable && 'local Supabase stack not reachable at 127.0.0.1:54321' }, () => {
+  const ELIG_XLSX = join(OUTPUT_DIR, 'test-fixture-eligibility.xlsx');
+  const ELIG_STATE = join(OUTPUT_DIR, 'test-state-eligibility.json');
+  // Covers every combination the approved rule requires: blank/No/Yes
+  // crossed with Number Valid blank/set, proving Number Valid has zero
+  // effect on eligibility in either direction.
+  const ELIG_PLACES = ['ELIG-TEST-1', 'ELIG-TEST-2', 'ELIG-TEST-3', 'ELIG-TEST-4', 'ELIG-TEST-5', 'ELIG-TEST-6'];
+  const eligArgs = [`--file=${ELIG_XLSX}`, `--state-file=${ELIG_STATE}`];
+
+  function buildEligibilityFixture() {
+    const base = { formatted_address: 'addr', latitude: 12.9, longitude: 77.6, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: null, google_maps_uri: 'uri', discovery_sources: 'src', verification_status: 'unverified', verified_le_100: false, 'Menu Details/Notes': null };
+    const rows = [
+      // blank Menu List Under 100 + blank Number Valid -> eligible
+      { ...base, place_id: ELIG_PLACES[0], name: 'Elig blank + NumberValid blank', 'Number Valid': null, 'Menu List Under 100': null },
+      // blank Number Valid + No -> not eligible
+      { ...base, place_id: ELIG_PLACES[1], name: 'Elig No + NumberValid blank', 'Number Valid': null, 'Menu List Under 100': 'No' },
+      // blank Number Valid + Yes -> not eligible
+      { ...base, place_id: ELIG_PLACES[2], name: 'Elig Yes + NumberValid blank', 'Number Valid': null, 'Menu List Under 100': 'Yes' },
+      // No, with Number Valid SET -> still not eligible (proves Number Valid doesn't matter)
+      { ...base, place_id: ELIG_PLACES[3], name: 'Elig No + NumberValid set', 'Number Valid': 'Yes', 'Menu List Under 100': 'No' },
+      // Yes, with Number Valid SET -> still not eligible
+      { ...base, place_id: ELIG_PLACES[4], name: 'Elig Yes + NumberValid set', 'Number Valid': 'Yes', 'Menu List Under 100': 'Yes' },
+      // blank Menu List Under 100, with Number Valid SET -> still eligible
+      { ...base, place_id: ELIG_PLACES[5], name: 'Elig blank + NumberValid set', 'Number Valid': 'No', 'Menu List Under 100': null },
+    ];
+
+    const headers = Object.keys(rows[0]);
+    const pyPath = join(OUTPUT_DIR, '.build-eligibility-fixture.py');
+    const script = `
+import json, sys
+import openpyxl
+headers = json.loads(sys.argv[1])
+rows = json.loads(sys.argv[2])
+path = sys.argv[3]
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.append(headers)
+for row in rows:
+    ws.append([row.get(h) for h in headers])
+wb.save(path)
+`;
+    mkdirSync(OUTPUT_DIR, { recursive: true });
+    writeFileSync(pyPath, script, 'utf8');
+    const result = spawnSync('python', [pyPath, JSON.stringify(headers), JSON.stringify(rows), ELIG_XLSX], { encoding: 'utf8' });
+    unlinkSync(pyPath);
+    if (result.status !== 0) throw new Error(`Could not build eligibility fixture: ${result.stderr || result.stdout}`);
+  }
+
+  function cleanupEligibilityArtifacts() {
+    for (const f of [ELIG_XLSX, ELIG_STATE]) {
+      if (existsSync(f)) rmSync(f, { force: true });
+    }
+    if (existsSync(BACKUPS_DIR)) {
+      for (const f of readdirSync(BACKUPS_DIR)) {
+        if (f.startsWith('test-fixture-eligibility.xlsx')) rmSync(join(BACKUPS_DIR, f), { force: true });
+      }
+    }
+  }
+
+  async function cleanupEligibilityDb() {
+    for (const placeId of ELIG_PLACES) {
+      await dbDeleteHard(placeId);
+    }
+  }
+
+  before(async () => {
+    cleanupEligibilityArtifacts();
+    await cleanupEligibilityDb();
+    buildEligibilityFixture();
+  });
+
+  after(async () => {
+    cleanupEligibilityArtifacts();
+    await cleanupEligibilityDb();
+  });
+
+  test('status on a fresh eligibility fixture: 2 Yes, 2 No, 2 blank/eligible', () => {
+    const { status, stdout, stderr } = runScript(['--status', ...eligArgs]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Total candidates\s*: 6/);
+    assert.match(stdout, /Already manually verified \(Yes\)\s*: 2/);
+    assert.match(stdout, /Not eligible \(No\)\s*: 2/);
+    assert.match(stdout, /Eligible for research \(blank\)\s*: 2/);
+    assert.match(stdout, /In progress \(active batch\)\s*: 0/);
+    assert.match(stdout, /Completed \(pulled \+ purged\)\s*: 0/);
+    assert.match(stdout, /Remaining eligible \(blank, not yet pushed\/completed\)\s*: 2/);
+  });
+
+  test('push selects ONLY the blank rows, regardless of Number Valid', async () => {
+    const { status, stdout, stderr } = runScript(['--push', '--batch-size=10', ...eligArgs]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Pushed batch 1: 2 candidate\(s\)/);
+
+    assert.ok(await dbGet(ELIG_PLACES[0]), 'blank + Number Valid blank must be pushed');
+    assert.ok(await dbGet(ELIG_PLACES[5]), 'blank + Number Valid set must still be pushed — Number Valid never gates eligibility');
+
+    assert.equal(await dbGet(ELIG_PLACES[1]), null, 'No + Number Valid blank must never be pushed');
+    assert.equal(await dbGet(ELIG_PLACES[2]), null, 'Yes + Number Valid blank must never be pushed');
+    assert.equal(await dbGet(ELIG_PLACES[3]), null, 'No + Number Valid set must never be pushed');
+    assert.equal(await dbGet(ELIG_PLACES[4]), null, 'Yes + Number Valid set must never be pushed');
+  });
+
+  test('status while the batch is active: remaining eligible drops to 0, Yes/No/blank breakdown unchanged', () => {
+    const { status, stdout, stderr } = runScript(['--status', ...eligArgs]);
+    assert.equal(status, 0, stdout + stderr);
+    // push() never writes the xlsx, so the raw Yes/No/blank counts (a
+    // property of the file's current content) are exactly as before.
+    assert.match(stdout, /Already manually verified \(Yes\)\s*: 2/);
+    assert.match(stdout, /Not eligible \(No\)\s*: 2/);
+    assert.match(stdout, /Eligible for research \(blank\)\s*: 2/);
+    assert.match(stdout, /In progress \(active batch\)\s*: 2/);
+    assert.match(stdout, /Completed \(pulled \+ purged\)\s*: 0/);
+    // Both blank rows are now in progress, so none are left remaining — and
+    // critically, no No/Yes row is ever counted here regardless.
+    assert.match(stdout, /Remaining eligible \(blank, not yet pushed\/completed\)\s*: 0/);
+  });
+
+  test('cleanup: purge the eligibility test batch, leaving the suite with no active batch', async () => {
+    const { status, stdout, stderr } = runScript(['--pull', '--purge', ...eligArgs]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Purged 2 row\(s\)\./);
   });
 });

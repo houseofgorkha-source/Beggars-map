@@ -10,13 +10,15 @@ export default defineConfig({
   server: {
     host: true,
   },
-  // Second entry point for the standalone admin report view (admin.html /
-  // src/admin/*) — not linked from the public app, its own small bundle.
+  // Second/third entry points for standalone internal pages (admin.html /
+  // src/admin/*, discovery.html / src/discovery/*) — not linked from the
+  // public app, each its own small bundle.
   build: {
     rollupOptions: {
       input: {
         main: 'index.html',
         admin: 'admin.html',
+        discovery: 'discovery.html',
       },
     },
   },
