@@ -84,6 +84,30 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
     });
   }
 
+  // Selects/deselects only the rows currently displayed (i.e. `data` — the
+  // current page of the current filter), never anything beyond that. If
+  // every displayed row is already selected, this deselects just those
+  // rows; otherwise it adds all displayed rows to whatever is already
+  // selected (selections already persisted across pages before this
+  // existed — setPage never clears `selected` — so paging to the next 20
+  // and selecting-all again naturally accumulates a cross-page selection
+  // without this needing any special handling of its own).
+  const allDisplayedSelected = data.length > 0 && data.every((l) => selected.has(l.id));
+  const someDisplayedSelected = data.some((l) => selected.has(l.id));
+
+  function toggleSelectAll() {
+    const displayedIds = data.map((l) => l.id);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allDisplayedSelected) {
+        for (const id of displayedIds) next.delete(id);
+      } else {
+        for (const id of displayedIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   // Deliberately raw reviewed_at, not isNew: "mark selected" can act on an
   // explicitly-chosen legacy/pre-baseline listing too (the baseline only
@@ -240,6 +264,7 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
       </div>
 
       <div className="admin-bulk-toolbar">
+        {selected.size > 0 ? <span className="admin-selected-count">{selected.size} selected</span> : null}
         <button
           className="admin-button admin-button-small admin-button-secondary"
           disabled={selectedUnreviewedCount === 0}
@@ -316,7 +341,17 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
         <table className="admin-table">
           <thead>
             <tr>
-              <th></th>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={allDisplayedSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someDisplayedSelected && !allDisplayedSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                  aria-label="Select all currently displayed listings"
+                />
+              </th>
               <th className="admin-sortable" onClick={() => toggleSort('name')}>
                 Name {sortBy === 'name' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
               </th>
