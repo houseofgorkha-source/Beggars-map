@@ -45,7 +45,11 @@
 //   name        <- Excel `name`, verbatim
 //   price       <- the MINIMUM integer found in `Menu Details/Notes`, after
 //                  URLs are stripped out (so a domain like foo123.com can
-//                  never be read as a price)
+//                  never be read as a price). If the note contains "₹" at
+//                  all, ONLY "₹"-prefixed numbers count — a bare quantity
+//                  like "(2)" or a leading "2 idli vada" is never mistaken
+//                  for a price. A note with no "₹" anywhere falls back to
+//                  reading any bare number (see minPriceFrom's own comment).
 //   note        <- `Menu Details/Notes`, verbatim, unchanged
 //   lat/lng     <- Excel `latitude` / `longitude`
 //   is_hidden   <- always true; nothing imported here goes live on its own
@@ -152,6 +156,27 @@ const MANUAL_DISH_OVERRIDES = {
     { dish: 'adhra meal', price: 80 },
   ],
 };
+
+// Mirrors web/src/lib/dishes.ts and src/lib/dishes.ts's formatDishes() —
+// the exact plain-language sentence ("Dish ₹Price, Dish ₹Price") the map
+// popup and detail screen already derive from `dishes` at render time.
+// Duplicated here rather than imported, same reasoning as this repo's other
+// per-context duplication (content moderation, place ranking): this is a
+// plain Node .mjs script, dishes.ts is a TS module for the two client apps.
+//
+// Used to give a MANUAL_DISH_OVERRIDES row's `note` the same content that
+// already renders correctly in the map card/list for every *older* import
+// (whose `note` holds raw menu text) — not a fabricated review, just the
+// listing's own dish data restated as its description, matching how every
+// pre-existing restaurant's note already reads. `web/src/App.tsx`'s and
+// `src/screens/MapScreen.tsx`'s list-card rows read `note` directly with no
+// `dishes` fallback of their own, so this is what keeps those two views
+// (and the "Review" reveal, which is gated on note existing) populated for
+// dish-override rows without touching either list-card component or the
+// Add Listing form.
+function formatDishesForNote(entries) {
+  return entries.map((entry) => `${entry.dish} ₹${entry.price}`).join(', ');
+}
 
 const MIME_TYPES = {
   '.jpg': 'image/jpeg',
@@ -352,19 +377,37 @@ function readWorkbook(xlsxPath) {
 // only: a digit run that is part of a decimal or a longer number is
 // ignored, so a postcode inside an address fragment can't become a price.
 //
-// A number that is a QUANTITY rather than a price is excluded too. Real
+// A number that is a QUANTITY rather than a price is excluded too. Original
 // example that made this necessary: "Biryani rice 90, parotha(2nos) 60,
-// rahi ball(2nos) 60" — the 2 in "(2nos)" is how many parothas you get,
-// not what they cost, and being the smallest number in the string it would
-// otherwise become the listing's price (Rs 2, sorting straight to the top
-// of a cheapest-first map). Covers the forms these notes actually use —
-// 2nos / 2 nos / 2no / 2pcs / 2 pcs / 2 piece / 2 pieces, any case — and
-// nothing else: a plain "60" or "60," is still read exactly as before, so
-// genuine prices are untouched.
+// rahi ball(2nos) 60" — the 2 in "(2nos)" is how many parothas you get, not
+// what they cost. That fix only covered a quantity immediately followed by
+// a unit word (nos/pcs/pieces). It did NOT cover a bare parenthetical count
+// with no unit word ("samosa (2) ₹60"), or a leading quantity before an item
+// name ("2 idli vada ₹50", "3 chapati , 2 anda roast ₹95") — both real,
+// confirmed-live cases (Batch 3 research) where the bare quantity number
+// was smaller than every genuine price and became the listing's price
+// outright (Rs 1-2, sorting straight to the top of a cheapest-first map).
 //
-// Written as one regex literal rather than assembled from a template
-// string: a template literal swallows the backslashes ("\d" becomes a plain
+// Fix: this dataset's own convention is that EVERY genuine price a human
+// researcher writes down is marked with "₹" (confirmed across all 42
+// currently-qualifying rows at the time of this fix — see
+// tests/importExcelPrice.test.mjs). So whenever a note contains "₹" at
+// all, ONLY "₹"-prefixed numbers count as prices; every bare number
+// elsewhere (a parenthetical count, a leading quantity, anything else) is
+// never even considered, however small. A note with NO "₹" anywhere (e.g.
+// MANUAL_DISH_OVERRIDES' raw notes, which are plain "word number word
+// number" text with no currency symbol at all) falls back to the original
+// bare-digit regex unchanged — the ₹-only rule cannot apply to a note that
+// never uses ₹, and this keeps those rows working exactly as they did
+// before this fix (verified empirically: 0 of the 3 MANUAL_DISH_OVERRIDES
+// rows, and 0 of the other 31 already-correct qualifying rows, changed
+// behavior under this fix — only the 11 rows that mixed a real ₹ price
+// with a bare quantity number changed, and all 11 changed correctly).
+//
+// Both patterns are regex literals rather than assembled from a template
+// string: a template literal swallows backslashes ("\d" becomes a plain
 // "d"), which silently turns [\d.] into [d.] and breaks the whole pattern.
+const RUPEE_PRICE_PATTERN = /₹\s*(\d{1,4})(?![\d.])/g;
 //   (?<![\d.])                      not preceded by a digit or a decimal point
 //   \d{1,4}                         the number itself
 //   (?![\d.])                       not followed by a digit or a decimal point
@@ -374,6 +417,14 @@ const PRICE_PATTERN = /(?<![\d.])\d{1,4}(?![\d.])(?!\s*(?:nos?|pcs?|pieces?)\b)/
 function minPriceFrom(note) {
   if (typeof note !== 'string') return null;
   const withoutUrls = note.replace(/https?:\/\/\S+/g, ' ');
+
+  if (withoutUrls.includes('₹')) {
+    const rupeeNumbers = [...withoutUrls.matchAll(RUPEE_PRICE_PATTERN)].map((m) => Number(m[1]));
+    if (rupeeNumbers.length > 0) return Math.min(...rupeeNumbers);
+    // "₹" appeared but nothing recognizable followed it (malformed/typo) —
+    // fall through to the bare-digit pattern rather than reporting no price.
+  }
+
   // String.match with a /g regex ignores lastIndex, so reusing this shared
   // pattern across calls is safe.
   const numbers = (withoutUrls.match(PRICE_PATTERN) ?? []).map(Number);
@@ -1049,9 +1100,12 @@ async function main() {
       excelRow,
       place_id: placeId,
       name,
-      // A dish-override row has no review yet (it's brand new), so note
-      // stays null rather than the raw menu text — see MANUAL_DISH_OVERRIDES.
-      note: dishOverride ? null : typeof note === 'string' ? note : null,
+      // A dish-override row has no real customer review yet — this is NOT
+      // one — but its note is populated with the same formatted dish
+      // sentence the map card already derives from `dishes`, so the list
+      // views (which read `note` directly, with no dishes fallback) show
+      // the same info instead of going blank. See formatDishesForNote above.
+      note: dishOverride ? formatDishesForNote(dishOverride) : typeof note === 'string' ? note : null,
       dishes: dishOverride,
       // Derived from the override so it can never disagree with it; the
       // regex-extracted `price` is only used when there's no override.
