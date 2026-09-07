@@ -284,5 +284,30 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, updatedCount });
   }
 
+  if (body.action === 'bulkUnhide') {
+    // Deliberately narrower than bulkMarkReviewed: explicit listingIds only,
+    // no filters-based "sweep everything matching X" mode. Unhiding is a
+    // one-way "this becomes publicly visible" action, so this action must
+    // never be able to touch anything beyond a caller-supplied, explicit
+    // set of IDs — there's no legitimate case here (unlike marking a whole
+    // NEW queue reviewed) for "unhide every listing matching some filter".
+    if (!Array.isArray(body.listingIds) || body.listingIds.length === 0) {
+      return json({ error: 'listingIds must be a non-empty array' }, 400);
+    }
+
+    // Reuses the existing, unmodified unhideListing() for every ID — same
+    // function the single-listing 'unhide' action above already calls, so
+    // this gets its exact behavior (is_hidden=false only, one audit_log
+    // entry per listing) for free, with zero duplicated logic.
+    let updatedCount = 0;
+    for (const listingId of body.listingIds) {
+      const result = await unhideListing(adminClient, listingId, adminEmail, meta);
+      if (!result.ok) return json({ error: `Failed partway through (${updatedCount} succeeded): ${result.error}` }, result.status);
+      updatedCount += 1;
+    }
+
+    return json({ success: true, updatedCount });
+  }
+
   return json({ error: 'Unknown action' }, 400);
 });

@@ -26,6 +26,13 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
   const [pendingBulk, setPendingBulk] = useState<PendingBulk | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Separate from pendingBulk/confirmBulk/bulkBusy above on purpose — this
+  // is its own action (bulkUnhide, listingIds-only, no filtered/all modes),
+  // and keeping its state independent means nothing here can change how
+  // the existing "mark reviewed" bulk flow behaves.
+  const [pendingUnhideCount, setPendingUnhideCount] = useState<number | null>(null);
+  const [unhideBusy, setUnhideBusy] = useState(false);
+
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -84,6 +91,9 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
   // explicitly choose to review) — matches bulkMarkReviewed's own
   // "listingIds" mode on the server, which uses the same raw condition.
   const selectedUnreviewedCount = data.filter((l) => selected.has(l.id) && !l.reviewed_at).length;
+  // Same reasoning as selectedUnreviewedCount above, for the hidden set —
+  // only currently-hidden selected rows are real candidates for unhide.
+  const selectedHiddenCount = data.filter((l) => selected.has(l.id) && l.is_hidden).length;
 
   // "Mark all filtered" and "mark all new" need the exact count of
   // currently-unreviewed matches BEFORE showing a confirmation — reusing
@@ -139,6 +149,33 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
       load();
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  function openUnhideConfirm() {
+    if (selectedHiddenCount === 0) return;
+    setPendingUnhideCount(selectedHiddenCount);
+  }
+
+  async function confirmUnhide() {
+    if (pendingUnhideCount === null) return;
+    setUnhideBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      // Only the currently-selected, currently-hidden rows — never the
+      // full `selected` set blindly, in case a selection also includes an
+      // already-visible row.
+      const targetIds = data.filter((l) => selected.has(l.id) && l.is_hidden).map((l) => l.id);
+      const res = await adminApi.listingsBulkUnhide(targetIds);
+      setMessage(`Unhid ${res.updatedCount} listing(s).`);
+      setSelected(new Set());
+      setPendingUnhideCount(null);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUnhideBusy(false);
     }
   }
 
@@ -216,7 +253,39 @@ export default function ListingsList({ initialFilters, onOpenListing }: Props) {
         <button className="admin-button admin-button-small admin-button-secondary" onClick={() => openAllConfirm('all')}>
           Mark all new listings as reviewed
         </button>
+        <button
+          className="admin-button admin-button-small admin-button-secondary"
+          disabled={selectedHiddenCount === 0}
+          onClick={openUnhideConfirm}
+        >
+          Unhide selected {selected.size > 0 ? `(${selectedHiddenCount})` : ''}
+        </button>
       </div>
+
+      {pendingUnhideCount !== null ? (
+        <div className="admin-confirm-box">
+          <p>
+            {pendingUnhideCount === 0
+              ? 'No hidden listings are selected.'
+              : `This will unhide exactly ${pendingUnhideCount} selected listing(s), making them publicly visible. Only is_hidden changes — no other field is touched.`}
+          </p>
+          <div className="admin-actions">
+            <button
+              className="admin-button admin-button-small"
+              disabled={unhideBusy || pendingUnhideCount === 0}
+              onClick={confirmUnhide}
+            >
+              Confirm
+            </button>
+            <button
+              className="admin-button admin-button-small admin-button-secondary"
+              onClick={() => setPendingUnhideCount(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {pendingBulk ? (
         <div className="admin-confirm-box">

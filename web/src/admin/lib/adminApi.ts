@@ -184,6 +184,12 @@ export const adminApi = {
   listingsBulkMarkReviewed: (opts: { listingIds?: string[]; filters?: ListingFilters }) =>
     invoke<{ success: true; updatedCount: number }>('admin-listings', { action: 'bulkMarkReviewed', ...opts }),
 
+  // Explicit listingIds only — no filters mode, unlike bulkMarkReviewed
+  // above. See the server action's own comment for why unhiding must never
+  // support a "sweep everything matching X" mode.
+  listingsBulkUnhide: (listingIds: string[]) =>
+    invoke<{ success: true; updatedCount: number }>('admin-listings', { action: 'bulkUnhide', listingIds }),
+
   getSettings: () => invoke<{ data: Record<string, unknown> }>('admin-dashboard', { action: 'getSettings' }),
   updateSetting: (key: string, value: boolean) =>
     invoke<{ success: true }>('admin-dashboard', { action: 'updateSetting', key, value }),
