@@ -65,3 +65,48 @@ This stage is primarily driven by Google Maps rendering usage/cost approaching t
 ## Sequencing rule
 
 Stage 2A is complete foundation work. Stage 2B and Stage 3 are future stages and must remain separately scoped. Do not infer missing requirements or begin either stage without explicit approval.
+
+# Current Project State (as of 2026-09-08)
+
+Concise, factual snapshot of what is actually true right now — kept separate from the roadmap above, which is durable/forward-looking. Full narrative and historical detail for everything below lives in AGENTS.md; this section exists so a fresh session can get oriented without reading that much longer log first. Verify against AGENTS.md and production directly before relying on this for anything consequential — it decays the same way any status snapshot does.
+
+## Production listings
+
+**60 listings live in production, 0 hidden.** The original 28 (seed/import/user-submitted, predating this pass) plus 32 newly imported from Discovery Workbench Batch 3 and unhidden (see below). Confirmed directly against production, not inferred.
+
+## Discovery Workbench Batch 3 — completed and published
+
+Fully closed out, end to end:
+- 100 candidates were researched by a remote intern through the deployed `discovery.html` page against **production**'s own `discovery-workbench` Edge Function — a separate path from the owner's local `workbench-sync.mjs` (see below).
+- All 100 rows' completed research (Number Valid / Menu List Under 100 / Menu Details/Notes) were pulled from production into the local WIP xlsx and verified field-for-field; photos were downloaded to `tools/discovery/photos/<place_id>/`.
+- Production's `discovery_batch_rows` was purged clean afterward (0 rows), verified directly.
+- Of the 100, 42 qualified (`Menu List Under 100 = Yes`): 32 were new inserts (their prices corrected by `import-excel.mjs`'s rupee-prefix fix, commit `2cdab35`, after 11 were initially found using a bare quantity number instead of the real price); 10 were already-imported duplicates, correctly skipped.
+- All 32 new listings were imported `is_hidden = true`, then unhidden via the new admin `bulkUnhide` action (see commits below) — confirmed live, 0 hidden remain.
+
+## Discovery Workbench — current workflow and safeguards
+
+- **`tools/discovery/workbench-sync.mjs` is LOCAL-ONLY by design** — no `--linked`/`--production` code path exists anywhere in it, and it refuses those flags outright if passed. It only ever pushes/pulls against the local Docker Supabase stack.
+- **Production's Discovery Workbench is a separate, independently-deployed instance** (its own `discovery_batch_rows` table, `discovery-workbench` Edge Function, and the deployed `discovery.html` page) that a real intern uses directly, authenticated via their own Google OAuth session — not reachable by `workbench-sync.mjs` at all.
+- Getting a batch in front of the intern therefore requires a deliberate, separate, one-time production-transfer step (as was done for Batch 3) — `workbench-sync.mjs --push` alone only ever stages a batch locally.
+- Eligibility is a permanent rule on one column only: `Menu List Under 100` blank = eligible; `No`/`Yes` = permanently excluded (a decision already made elsewhere). `Number Valid` plays no role in eligibility.
+- `reconcileState()` re-reads the live (local) table before every command and self-heals the local state file against it — adopts orphaned live rows, completes rows no longer live. This is what safely closed out a stale, all-blank local leftover from Batch 3's own local testing (100 rows, reconciled straight to `completed`, zero Excel writes) before Batch 4 could be pushed.
+- **Never run `--pull` against a batch that hasn't been confirmed to hold genuine, current research.** Pulling writes directly into the WIP xlsx's `Number Valid`/`Menu List Under 100`/`Menu Details/Notes` columns — a stale or blank batch would silently overwrite real, already-correct data with blanks.
+
+## Discovery Workbench Batch 4 — pushed locally, NOT yet in production
+
+- Pushed via `workbench-sync.mjs --push --batch-size=100` (the script's own default is 50 — 100 was passed explicitly to match the standard batch size).
+- **Batch ID 4, 100 candidates, 0 photos** (none of these 100 place_ids have local photos on disk yet — expected, not an error).
+- Confirmed staged in the **local** Docker stack's `discovery_batch_rows` only. Production was directly re-checked immediately after: still 0 `discovery_batch_rows` and 60 listings, unchanged.
+- **Not yet visible to the intern.** That requires the same kind of explicit, separate production-transfer step Batch 3 needed — not performed for Batch 4, and out of scope of this pass.
+
+## Latest relevant commits
+
+- `2cdab35` — fix: parse rupee-prefixed discovery prices correctly (the `minPriceFrom()` fix behind all 32 Batch 3 imports having correct, non-quantity prices)
+- `fe09249` — fix: add Select All checkbox to admin Listings table
+- `6c23372` — feat: add admin bulkUnhide action for batch-unhiding listings
+- `b900912` — feat: add data-driven query-param SEO/sitemap for real search intent
+
+## Parked / uncommitted — do not touch without explicit instruction
+
+- **The "No Answer" call-attempt counter feature is parked, unfinished, in a local git stash** (`parked: No Answer counter (unfinished, for later)`) — it is not in tracked history and not in production. Do not revive it without being explicitly asked.
+- **`.claude/settings.json` carries a pre-existing, intentional local modification** unrelated to any project work above — do not commit it or otherwise resolve it without being explicitly asked.
