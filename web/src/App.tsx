@@ -6,8 +6,12 @@ import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPla
 import { placeTypeRank, TYPE_RANK_POI } from './lib/placeRanking';
 import { formatRelativeTime } from './lib/relativeTime';
 import { distanceKm } from './lib/distance';
+import { filterByDimension, denormalizeDimensionValue } from './lib/extractDimensions';
+import { useFilterParams } from './hooks/useFilterParams';
+import { useMetaTags } from './hooks/useMetaTags';
 import MapView from './components/MapView';
 import Logo from './components/Logo';
+import Breadcrumbs from './components/Breadcrumbs';
 import AddListingModal from './components/AddListingModal';
 import LegalModal from './components/LegalModal';
 import AboutContent from './components/AboutContent';
@@ -127,6 +131,7 @@ function computeSheetSnaps(containerHeight: number, peekContentHeight: number) {
 
 export default function App() {
   const isMobilePortrait = useMediaQuery(MOBILE_PORTRAIT_QUERY);
+  const [filters, updateFilters] = useFilterParams();
   const [listings, setListings] = useState<ListingWithVotes[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -290,6 +295,44 @@ export default function App() {
     load();
   }, [load]);
 
+  // Update meta tags dynamically based on current filters
+  const metaTags = useMemo(() => {
+    let title = 'Beggars Map — Affordable Eats in Bengaluru';
+    let description = 'Crowdsourced map of affordable eats in Bengaluru, ₹100 or under. No login needed to browse or post.';
+
+    const parts: string[] = [];
+    if (filters.cuisine) {
+      parts.push(denormalizeDimensionValue(filters.cuisine));
+    }
+    if (filters.mealType) {
+      parts.push(denormalizeDimensionValue(filters.mealType));
+    }
+    if (filters.dish) {
+      parts.push(denormalizeDimensionValue(filters.dish));
+    }
+    if (filters.location) {
+      parts.push(`in ${denormalizeDimensionValue(filters.location)}`);
+    }
+    if (filters.price) {
+      parts.push(`${denormalizeDimensionValue(filters.price).replace(/-/g, ' ')}`);
+    }
+
+    if (parts.length > 0) {
+      title = `${parts.join(' ')} — Affordable Eats in Bengaluru`;
+      description = `Find ${parts.join(' ')} under ₹100 in Bengaluru. Crowdsourced, no login needed.`;
+    }
+
+    return {
+      title,
+      description,
+      ogTitle: title,
+      ogDescription: description,
+      ogUrl: `https://www.beggarsmap.com${window.location.search}`,
+    };
+  }, [filters]);
+
+  useMetaTags(metaTags);
+
   // Distance is a derived layer on top of the fetched listings — recomputed
   // whenever either the listings or the user's own location changes, not
   // baked into `load()` itself (userLocation usually resolves asynchronously
@@ -380,13 +423,45 @@ export default function App() {
   // none does the resolved geographic area's nearby listings (ranked by
   // sortAreaMatches) become the result; neither existing -> empty (the
   // list panel's own empty/add-place state handles that).
+  //
+  // Dimension filters (cuisine, dish, location, price, mealType) are applied
+  // on top of the search results to enable SEO-friendly query params without
+  // changing the core search behavior.
   const filtered = useMemo(() => {
-    if (!trimmedQuery) return listingsWithDistance;
-    if (textMatches.length > 0) return sortTextMatches(textMatches, trimmedQuery);
-    if (areaListings.length > 0) return sortAreaMatches(areaListings, areaCenter);
-    return [];
+    let result: ListingWithDistance[];
+
+    if (!trimmedQuery) {
+      result = listingsWithDistance;
+    } else if (textMatches.length > 0) {
+      result = sortTextMatches(textMatches, trimmedQuery);
+    } else if (areaListings.length > 0) {
+      result = sortAreaMatches(areaListings, areaCenter);
+    } else {
+      result = [];
+    }
+
+    // Apply dimension filters on top of search results
+    if (result.length > 0) {
+      if (filters.cuisine) {
+        result = filterByDimension(result, 'cuisine', filters.cuisine);
+      }
+      if (filters.mealType) {
+        result = filterByDimension(result, 'meal-type', filters.mealType);
+      }
+      if (filters.dish) {
+        result = filterByDimension(result, 'dish', filters.dish);
+      }
+      if (filters.location) {
+        result = filterByDimension(result, 'locality', filters.location);
+      }
+      if (filters.price) {
+        result = filterByDimension(result, 'price-range', filters.price);
+      }
+    }
+
+    return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmedQuery, listingsWithDistance, textMatches, areaListings, areaCenter, userLocation]);
+  }, [trimmedQuery, listingsWithDistance, textMatches, areaListings, areaCenter, userLocation, filters]);
 
   // Nearest-first when the viewer's own location is known, else
   // newest-first — mobile's own always-on browse-time ordering (unchanged).
@@ -1180,6 +1255,7 @@ export default function App() {
         </section>
 
         <div className="map-panel">
+          <Breadcrumbs filters={filters} />
           <p className="map-banner-tagline">Why do we call it Beggars Map? Why not? Why beat around the bush? 😄</p>
 
           <div
