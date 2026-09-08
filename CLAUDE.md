@@ -72,7 +72,7 @@ Concise, factual snapshot of what is actually true right now — kept separate f
 
 ## Production listings
 
-**60 listings live in production, 0 hidden.** The original 28 (seed/import/user-submitted, predating this pass) plus 32 newly imported from Discovery Workbench Batch 3 and unhidden (see below). Confirmed directly against production, not inferred.
+**89 listings live in production, 0 hidden.** The original 28 (seed/import/user-submitted, predating this pass) plus 32 from Discovery Workbench Batch 3 plus 29 from Discovery Workbench Batch 4 (both fully imported and unhidden — see below). Confirmed directly against production, not inferred.
 
 ## Discovery Workbench Batch 3 — completed and published
 
@@ -83,24 +83,41 @@ Fully closed out, end to end:
 - Of the 100, 42 qualified (`Menu List Under 100 = Yes`): 32 were new inserts (their prices corrected by `import-excel.mjs`'s rupee-prefix fix, commit `2cdab35`, after 11 were initially found using a bare quantity number instead of the real price); 10 were already-imported duplicates, correctly skipped.
 - All 32 new listings were imported `is_hidden = true`, then unhidden via the new admin `bulkUnhide` action (see commits below) — confirmed live, 0 hidden remain.
 
+## Discovery Workbench Batch 4 — completed and published
+
+Fully closed out end to end, following the same lifecycle as Batch 3 (see "The established Discovery Workbench batch lifecycle" below):
+- 100 candidates were pushed locally (`workbench-sync.mjs --push --batch-size=100`), then transferred to production's `discovery_batch_rows` for the intern via the same one-time production-transfer step Batch 3 needed.
+- Of the 100, 94 had at least one researched field filled in; 29 qualified (`Menu List Under 100 = Yes`), 33 were marked `No`, 6 were left fully blank by the intern.
+- All 100 rows' research was pulled from production into the local WIP xlsx and verified field-for-field (94 rows updated, 0 unrelated rows touched, 0 conflicts with existing Excel data); 45 photos across 29 place_ids were downloaded to `tools/discovery/photos/<place_id>/`.
+- Production's `discovery_batch_rows` and `discovery-photos` bucket were purged clean afterward (0 rows, 0 files), verified directly.
+- All 29 qualifying rows were new inserts (0 already-imported duplicates from this batch) — imported `is_hidden = true` via `import-excel.mjs --production --execute`, then unhidden via the admin `bulkUnhide` action — confirmed live: production reached 89 listings, 0 hidden.
+
+## Discovery Workbench Batch 5 — staged in production, NOT yet researched
+
+- Pushed locally (`workbench-sync.mjs --push --batch-size=100`, batch ID 5, 100 candidates, 0 photos — none of these place_ids have local photos on disk yet) and transferred to production the same way Batches 3 and 4 were.
+- Confirmed live in production: `discovery_batch_rows` holds exactly batch_id `5`, 100 rows, 100 distinct place_ids, 100% match against the local set, 0 duplicates. Production listings unaffected throughout this transfer (89, 0 hidden).
+- **Not yet researched by the intern.** Do NOT pull, purge, import, or publish Batch 5 until the intern's research is complete — as of now it is staged and visible to the intern, nothing more.
+
+## The established Discovery Workbench batch lifecycle
+
+Production Workbench → Pull → verify Excel → purge Workbench → production import dry-run → import → verify → admin bulk unhide → final verification.
+
+This is the exact sequence both Batch 3 and Batch 4 followed end to end and is the one to follow for every future batch — see the Batch 4 section above for what "verify" means at each step (field-for-field Excel/photo checks before purge; dry-run review before import; count/audit/integrity checks before and after unhide).
+
 ## Discovery Workbench — current workflow and safeguards
 
 - **`tools/discovery/workbench-sync.mjs` is LOCAL-ONLY by design** — no `--linked`/`--production` code path exists anywhere in it, and it refuses those flags outright if passed. It only ever pushes/pulls against the local Docker Supabase stack.
 - **Production's Discovery Workbench is a separate, independently-deployed instance** (its own `discovery_batch_rows` table, `discovery-workbench` Edge Function, and the deployed `discovery.html` page) that a real intern uses directly, authenticated via their own Google OAuth session — not reachable by `workbench-sync.mjs` at all.
-- Getting a batch in front of the intern therefore requires a deliberate, separate, one-time production-transfer step (as was done for Batch 3) — `workbench-sync.mjs --push` alone only ever stages a batch locally.
+- Getting a batch in front of the intern therefore requires a deliberate, separate, one-time production-transfer step (as done for Batches 3, 4, and 5) — `workbench-sync.mjs --push` alone only ever stages a batch locally.
 - Eligibility is a permanent rule on one column only: `Menu List Under 100` blank = eligible; `No`/`Yes` = permanently excluded (a decision already made elsewhere). `Number Valid` plays no role in eligibility.
 - `reconcileState()` re-reads the live (local) table before every command and self-heals the local state file against it — adopts orphaned live rows, completes rows no longer live. This is what safely closed out a stale, all-blank local leftover from Batch 3's own local testing (100 rows, reconciled straight to `completed`, zero Excel writes) before Batch 4 could be pushed.
 - **Never run `--pull` against a batch that hasn't been confirmed to hold genuine, current research.** Pulling writes directly into the WIP xlsx's `Number Valid`/`Menu List Under 100`/`Menu Details/Notes` columns — a stale or blank batch would silently overwrite real, already-correct data with blanks.
-
-## Discovery Workbench Batch 4 — pushed locally, NOT yet in production
-
-- Pushed via `workbench-sync.mjs --push --batch-size=100` (the script's own default is 50 — 100 was passed explicitly to match the standard batch size).
-- **Batch ID 4, 100 candidates, 0 photos** (none of these 100 place_ids have local photos on disk yet — expected, not an error).
-- Confirmed staged in the **local** Docker stack's `discovery_batch_rows` only. Production was directly re-checked immediately after: still 0 `discovery_batch_rows` and 60 listings, unchanged.
-- **Not yet visible to the intern.** That requires the same kind of explicit, separate production-transfer step Batch 3 needed — not performed for Batch 4, and out of scope of this pass.
+- **A stale LOCAL batch can outlive a batch that was already fully closed out in production.** Local and production keep independent `discovery_batch_rows` copies, so purging production's rows when closing out a batch does not touch local's own original, all-blank copy from that batch's initial local push. Before Batch 5 could be pushed, local still held Batch 4's original 100 blank rows even though the state file already had them marked `completed` — `reconcileState()` only checks `in_progress`, not `completed`, so it would have silently re-adopted them, blocking the next `--push` and, had `--pull` been run instead, overwriting valid Excel data with those stale blanks. Fix: verify and delete the stale local rows directly (after confirming no local photos exist for them) — never run `--pull`/`--pull --purge` to "clean up" a batch already known to be closed out elsewhere.
+- **`supabase storage rm --linked --experimental` silently no-ops without `--yes` in a non-interactive shell** — it defaults the confirmation prompt to "No," still exits 0, and returns `{"deleted":[]}` with no error. A purge that trusts that exit code alone can report success while deleting nothing. Always pass `--yes` explicitly for a non-interactive storage delete, and always re-list the bucket afterward to independently confirm it's actually empty before purging the corresponding database rows — this is what caught it during Batch 4's photo purge.
 
 ## Latest relevant commits
 
+- `758f5fc` — docs: add current project state snapshot to CLAUDE.md
 - `2cdab35` — fix: parse rupee-prefixed discovery prices correctly (the `minPriceFrom()` fix behind all 32 Batch 3 imports having correct, non-quantity prices)
 - `fe09249` — fix: add Select All checkbox to admin Listings table
 - `6c23372` — feat: add admin bulkUnhide action for batch-unhiding listings
