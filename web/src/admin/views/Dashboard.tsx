@@ -5,9 +5,17 @@ type Props = {
   onNavigateReports: () => void;
   onNavigateListings: (filters: { isHidden?: boolean; archived?: boolean; reviewed?: boolean }) => void;
   onNavigateAudit: () => void;
+  onNavigateCorrections: () => void;
+  onNavigateReviews: () => void;
 };
 
-export default function Dashboard({ onNavigateReports, onNavigateListings, onNavigateAudit }: Props) {
+export default function Dashboard({
+  onNavigateReports,
+  onNavigateListings,
+  onNavigateAudit,
+  onNavigateCorrections,
+  onNavigateReviews,
+}: Props) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoReview, setAutoReview] = useState<boolean | null>(null);
@@ -71,6 +79,14 @@ export default function Dashboard({ onNavigateReports, onNavigateListings, onNav
         <button className="admin-tile admin-tile-clickable" onClick={() => onNavigateListings({ reviewed: false })}>
           <div className="admin-tile-value">{stats.unreviewedListings}</div>
           <div className="admin-tile-label">New / unreviewed</div>
+        </button>
+        <button className="admin-tile admin-tile-clickable" onClick={onNavigateCorrections}>
+          <div className="admin-tile-value">{stats.pendingCorrections}</div>
+          <div className="admin-tile-label">Pending corrections</div>
+        </button>
+        <button className="admin-tile admin-tile-clickable" onClick={onNavigateReviews}>
+          <div className="admin-tile-value">{stats.totalReviews}</div>
+          <div className="admin-tile-label">Reviews</div>
         </button>
       </div>
 

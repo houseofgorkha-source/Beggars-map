@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { adminApi, AuditEntry, Listing, ListingPhoto } from '../lib/adminApi';
+import { adminApi, AuditEntry, Listing, ListingPhoto, ListingReview } from '../lib/adminApi';
 import AuditStateView from '../components/AuditStateView';
 
 type Props = {
@@ -37,20 +37,36 @@ export default function ListingDetail({ listingId, onBack }: Props) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [photos, setPhotos] = useState<ListingPhoto[]>([]);
   const [auditHistory, setAuditHistory] = useState<AuditEntry[]>([]);
+  const [reviews, setReviews] = useState<ListingReview[]>([]);
   const [fields, setFields] = useState<EditableFields | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
+  const [deletingReviewId, setDeletingReviewId] = useState<string | null>(null);
+  const [deleteReviewReason, setDeleteReviewReason] = useState('');
 
   const load = useCallback(() => {
     setError(null);
-    adminApi
-      .listingsGet(listingId)
-      .then((res) => {
-        setListing(res.data.listing);
-        setPhotos(res.data.photos);
-        setAuditHistory(res.data.auditHistory);
-        setFields(toEditable(res.data.listing));
+    Promise.all([adminApi.listingsGet(listingId), adminApi.reviewsList({ listingId })])
+      .then(([listingRes, reviewsRes]) => {
+        setListing(listingRes.data.listing);
+        setPhotos(listingRes.data.photos);
+        // Correction approve/reject and review-deletion events are filed
+        // under their own target_type/target_id (never this listing's own
+        // id — see admin-listings' `get` action), so they arrive as two
+        // separate arrays; merged and re-sorted here into one timeline
+        // rather than shown as separate sections, since an admin looking
+        // at a listing's history doesn't need the three event kinds
+        // visually separated, just correctly ordered together.
+        const combinedHistory = [
+          ...listingRes.data.auditHistory,
+          ...listingRes.data.correctionHistory,
+          ...listingRes.data.reviewHistory,
+        ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setAuditHistory(combinedHistory);
+        setFields(toEditable(listingRes.data.listing));
+        setReviews(reviewsRes.data);
       })
       .catch((err) => setError(err.message));
   }, [listingId]);
@@ -88,6 +104,30 @@ export default function ListingDetail({ listingId, onBack }: Props) {
       setError((err as Error).message);
     } finally {
       setBusy(null);
+    }
+  }
+
+  function startDeleteReview(r: ListingReview) {
+    setDeletingReviewId(r.id);
+    setDeleteReviewReason('');
+    setError(null);
+  }
+
+  async function confirmDeleteReview(r: ListingReview) {
+    if (!deleteReviewReason.trim()) {
+      setError('Enter a reason for deleting this review.');
+      return;
+    }
+    setReviewBusyKey(`${r.id}::delete`);
+    setError(null);
+    try {
+      await adminApi.reviewsDelete(r.id, deleteReviewReason.trim());
+      setDeletingReviewId(null);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setReviewBusyKey(null);
     }
   }
 
@@ -373,6 +413,61 @@ export default function ListingDetail({ listingId, onBack }: Props) {
             </ul>
           )}
         </div>
+      </div>
+
+      <div className="admin-section">
+        <h3>Reviews</h3>
+        {reviews.length === 0 ? (
+          <p className="admin-muted">No reviews yet.</p>
+        ) : (
+          <ul className="admin-history-list">
+            {reviews.map((r) => (
+              <li key={r.id}>
+                <div>
+                  {r.rating != null ? `${r.rating}★ ` : ''}
+                  <strong>{r.profiles?.display_name ?? r.created_by}</strong> — {new Date(r.created_at).toLocaleString()}
+                </div>
+                {r.review_text ? <p>{r.review_text}</p> : null}
+                {r.listing_review_photos.length > 0 ? (
+                  <div className="admin-photo-grid">
+                    {r.listing_review_photos.map((p) => (
+                      <a key={p.id} href={p.photo_url} target="_blank" rel="noreferrer">
+                        <img src={p.photo_url} alt="" className="admin-photo-thumb" />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                <button
+                  className="admin-button admin-button-small admin-button-secondary"
+                  disabled={reviewBusyKey === `${r.id}::delete`}
+                  onClick={() => startDeleteReview(r)}
+                >
+                  Delete review
+                </button>
+                {deletingReviewId === r.id ? (
+                  <div className="admin-reject-inline">
+                    <input
+                      className="admin-input"
+                      value={deleteReviewReason}
+                      onChange={(e) => setDeleteReviewReason(e.target.value)}
+                      placeholder="Why is this being deleted?"
+                    />
+                    <button
+                      className="admin-button admin-button-small"
+                      disabled={reviewBusyKey === `${r.id}::delete`}
+                      onClick={() => confirmDeleteReview(r)}
+                    >
+                      Confirm delete
+                    </button>
+                    <button className="admin-button admin-button-small admin-button-secondary" onClick={() => setDeletingReviewId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

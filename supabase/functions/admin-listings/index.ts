@@ -147,11 +147,58 @@ Deno.serve(async (req: Request) => {
       .limit(20);
     if (auditError) return json({ error: auditError.message }, 500);
 
+    // Correction approve/reject audit rows are filed under
+    // target_type='listing_correction', target_id=<the correction's own
+    // id> — never the listing's id — so they can't be found with the same
+    // eq(target_id, listingId) filter auditHistory above uses. Two-step:
+    // find this listing's own correction ids first, then pull whatever
+    // admin_audit_log rows reference any of them. Works for both approve
+    // and reject despite their before_state/after_state having different
+    // shapes, since this filters on the correction's own id, never on
+    // anything inside that JSON.
+    const { data: listingCorrectionIds, error: correctionIdsError } = await adminClient
+      .from('listing_corrections')
+      .select('id')
+      .eq('listing_id', body.listingId);
+    if (correctionIdsError) return json({ error: correctionIdsError.message }, 500);
+
+    let correctionHistory: unknown[] = [];
+    const correctionIds = (listingCorrectionIds ?? []).map((r: { id: string }) => r.id);
+    if (correctionIds.length > 0) {
+      const { data, error } = await adminClient
+        .from('admin_audit_log')
+        .select('*')
+        .eq('target_type', 'listing_correction')
+        .in('target_id', correctionIds)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) return json({ error: error.message }, 500);
+      correctionHistory = data ?? [];
+    }
+
+    // A deleted review no longer exists to join through, so this filters
+    // the audit row's own before_state snapshot directly instead —
+    // deleteReview's `before` is always a full select('*') on the review
+    // row pre-delete, so listing_id is always present there. Scoped to
+    // action='delete_review' specifically, so this is a targeted filter on
+    // one known JSON shape, not general cross-action JSON sniffing.
+    const { data: reviewHistory, error: reviewHistoryError } = await adminClient
+      .from('admin_audit_log')
+      .select('*')
+      .eq('target_type', 'listing_review')
+      .eq('action', 'delete_review')
+      .eq('before_state->>listing_id', body.listingId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (reviewHistoryError) return json({ error: reviewHistoryError.message }, 500);
+
     return json({
       data: {
         listing: { ...listing, isNew: isListingNew(listing, baseline) },
         photos: photos ?? [],
         auditHistory: auditHistory ?? [],
+        correctionHistory,
+        reviewHistory: reviewHistory ?? [],
       },
     });
   }

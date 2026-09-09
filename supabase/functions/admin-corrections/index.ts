@@ -1,10 +1,11 @@
 // Admin-only endpoint for reviewing user-submitted listing corrections
 // (name/dishes/location proposals, listing_corrections/0023) and for
-// reactively deleting an abusive community review (listing_reviews/0022).
-// Deliberately small, mirroring admin-reports' own shape: list the pending
-// queue, approve/reject one correction, delete one review. No bulk actions,
-// no filters beyond status — if that's ever needed, extend this the same
-// way admin-listings grew its own bulk actions over time.
+// moderating community reviews (listing_reviews/0022): list the corrections
+// queue (any status, optionally filtered by type), approve/reject one
+// correction, list reviews (globally or for one listing), delete one review
+// (reason required, folded into the audit row's request_metadata). No bulk
+// actions — if that's ever needed, extend this the same way admin-listings
+// grew its own bulk actions over time.
 //
 // Security model: identity/authorization lives in _shared/adminAuth.ts —
 // see that file's header for the full rationale (service-role key never
@@ -42,7 +43,17 @@ Deno.serve(async (req: Request) => {
   const { email: adminEmail, adminClient } = auth;
   const meta = requestMetadata(req);
 
-  let body: { action?: string; correctionId?: string; reason?: string; status?: string; reviewId?: string };
+  let body: {
+    action?: string;
+    correctionId?: string;
+    reason?: string;
+    status?: string;
+    correctionType?: string;
+    reviewId?: string;
+    listingId?: string;
+    page?: number;
+    pageSize?: number;
+  };
   try {
     body = await req.json();
   } catch {
@@ -53,12 +64,19 @@ Deno.serve(async (req: Request) => {
     // Defaults to the pending queue — the thing an admin actually needs to
     // act on. `status: 'all'` (or a specific status) lets the same action
     // double as a lightweight history view without a second endpoint.
+    // `profiles ( display_name )` — the submitter's identity, joined via
+    // the existing created_by -> profiles.id FK — was previously fetched
+    // as a raw uuid and never rendered anywhere; this closes that gap at
+    // the source rather than requiring a second round-trip client-side.
     let query = adminClient
       .from('listing_corrections')
-      .select(`${CORRECTION_COLUMNS}, listings ( name, dishes, price_rupees, latitude, longitude, location_label )`)
+      .select(
+        `${CORRECTION_COLUMNS}, listings ( name, dishes, price_rupees, latitude, longitude, location_label ), profiles ( display_name )`
+      )
       .order('created_at', { ascending: false });
     const status = body.status ?? 'pending';
     if (status !== 'all') query = query.eq('status', status);
+    if (body.correctionType) query = query.eq('correction_type', body.correctionType);
 
     const { data, error } = await query;
     if (error) return json({ error: error.message }, 500);
@@ -80,7 +98,11 @@ Deno.serve(async (req: Request) => {
   }
 
   if (body.action === 'deleteReview') {
-    if (!body.reviewId) return json({ error: 'Missing reviewId' }, 400);
+    // A reason is required (same posture as reject above) so the audit
+    // trail always explains why a piece of community content was removed —
+    // folded into request_metadata (already jsonb) rather than a new
+    // column, since this is the only action that ever needs it.
+    if (!body.reviewId || !body.reason) return json({ error: 'Missing reviewId/reason' }, 400);
 
     const { data: before, error: fetchError } = await adminClient
       .from('listing_reviews')
@@ -103,11 +125,40 @@ Deno.serve(async (req: Request) => {
       target_id: body.reviewId,
       before_state: before,
       after_state: null,
-      request_metadata: meta,
+      request_metadata: { ...meta, reason: body.reason },
     });
     if (!audit.ok) return json({ error: `Action succeeded but audit logging failed: ${audit.error}` }, 500);
 
     return json({ success: true });
+  }
+
+  if (body.action === 'listReviews') {
+    // listingId -> the per-listing case (ListingDetail's own Reviews
+    // section), no pagination needed since one listing's review count is
+    // always small. No listingId -> the global moderation queue, paginated
+    // like every other admin list action. Same implicit-FK-embed
+    // convention as `list` above: created_by -> profiles.id,
+    // listing_id -> listings.id, and the reverse FK from
+    // listing_review_photos.listing_review_id.
+    let query = adminClient
+      .from('listing_reviews')
+      .select(
+        'id, listing_id, created_by, rating, review_text, created_at, updated_at, listings ( name ), profiles ( display_name ), listing_review_photos ( id, photo_url, storage_path, position )',
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false });
+
+    if (body.listingId) {
+      query = query.eq('listing_id', body.listingId);
+    } else {
+      const page = Math.max(1, Number(body.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(body.pageSize) || 20));
+      query = query.range((page - 1) * pageSize, page * pageSize - 1);
+    }
+
+    const { data, error, count } = await query;
+    if (error) return json({ error: error.message }, 500);
+    return json({ data: data ?? [], total: count ?? 0 });
   }
 
   return json({ error: 'Unknown action' }, 400);

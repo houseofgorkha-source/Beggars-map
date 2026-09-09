@@ -6,11 +6,12 @@ import ListingsList from './views/ListingsList';
 import ListingDetail from './views/ListingDetail';
 import ReportsQueue from './views/ReportsQueue';
 import CorrectionsQueue from './views/CorrectionsQueue';
+import ReviewsQueue from './views/ReviewsQueue';
 import AuditLog from './views/AuditLog';
 import { adminApi, AuditLogFilters, ListingFilters } from './lib/adminApi';
 
 type AuthState = 'checking' | 'signed-out' | 'not-authorized' | 'authorized';
-type View = 'dashboard' | 'listings' | 'listing-detail' | 'reports' | 'corrections' | 'audit';
+type View = 'dashboard' | 'listings' | 'listing-detail' | 'reports' | 'corrections' | 'reviews' | 'audit';
 
 export default function AdminApp() {
   const [session, setSession] = useState<Session | null>(null);
@@ -84,6 +85,9 @@ export default function AdminApp() {
   function goCorrections() {
     setView('corrections');
   }
+  function goReviews() {
+    setView('reviews');
+  }
   function goAudit(filters: AuditLogFilters = {}) {
     setAuditFilters(filters);
     setNavKey((k) => k + 1);
@@ -153,6 +157,9 @@ export default function AdminApp() {
         <button className={`admin-nav-tab ${view === 'corrections' ? 'admin-nav-tab-active' : ''}`} onClick={goCorrections}>
           Corrections
         </button>
+        <button className={`admin-nav-tab ${view === 'reviews' ? 'admin-nav-tab-active' : ''}`} onClick={goReviews}>
+          Reviews
+        </button>
         <button className={`admin-nav-tab ${view === 'audit' ? 'admin-nav-tab-active' : ''}`} onClick={() => goAudit({})}>
           Audit Log
         </button>
@@ -160,7 +167,13 @@ export default function AdminApp() {
 
       <div className="admin-view">
         {view === 'dashboard' ? (
-          <Dashboard onNavigateReports={goReports} onNavigateListings={goListings} onNavigateAudit={() => goAudit({})} />
+          <Dashboard
+            onNavigateReports={goReports}
+            onNavigateListings={goListings}
+            onNavigateAudit={() => goAudit({})}
+            onNavigateCorrections={goCorrections}
+            onNavigateReviews={goReviews}
+          />
         ) : null}
 
         {view === 'listings' ? <ListingsList key={navKey} initialFilters={listingsFilters} onOpenListing={openListing} /> : null}
@@ -174,6 +187,8 @@ export default function AdminApp() {
         ) : null}
 
         {view === 'corrections' ? <CorrectionsQueue onViewHistory={(listingId) => goAudit({ targetId: listingId })} /> : null}
+
+        {view === 'reviews' ? <ReviewsQueue onOpenListing={openListing} /> : null}
 
         {view === 'audit' ? <AuditLog key={navKey} initialFilters={auditFilters} onOpenListing={openListing} /> : null}
       </div>

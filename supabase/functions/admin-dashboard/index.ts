@@ -123,6 +123,8 @@ Deno.serve(async (req: Request) => {
     bySourceRaw,
     reportGroupsResult,
     recentActivity,
+    pendingCorrections,
+    totalReviews,
   ] = await Promise.all([
     adminClient.from('listings').select('id', { count: 'exact', head: true }),
     adminClient.from('listings').select('id', { count: 'exact', head: true }).gte('created_at', sevenDaysAgo),
@@ -133,9 +135,22 @@ Deno.serve(async (req: Request) => {
     adminClient.from('listings').select('source'),
     getPendingReportGroups(adminClient),
     adminClient.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(20),
+    adminClient.from('listing_corrections').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+    adminClient.from('listing_reviews').select('id', { count: 'exact', head: true }),
   ]);
 
-  for (const r of [totalListings, newListings7d, newListings30d, hiddenListings, archivedListings, unreviewedListings, bySourceRaw, recentActivity]) {
+  for (const r of [
+    totalListings,
+    newListings7d,
+    newListings30d,
+    hiddenListings,
+    archivedListings,
+    unreviewedListings,
+    bySourceRaw,
+    recentActivity,
+    pendingCorrections,
+    totalReviews,
+  ]) {
     if (r.error) return json({ error: r.error.message }, 500);
   }
   if ('error' in reportGroupsResult) return json({ error: reportGroupsResult.error }, 500);
@@ -155,6 +170,8 @@ Deno.serve(async (req: Request) => {
       archivedListings: archivedListings.count ?? 0,
       unreviewedListings: unreviewedListings.count ?? 0,
       pendingReportGroups: reportGroupsResult.data.length,
+      pendingCorrections: pendingCorrections.count ?? 0,
+      totalReviews: totalReviews.count ?? 0,
       bySource,
       recentActivity: recentActivity.data ?? [],
     },

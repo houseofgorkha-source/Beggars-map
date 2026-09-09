@@ -56,6 +56,8 @@ function CorrectionDiff({ c }: { c: ListingCorrection }) {
 
 export default function CorrectionsQueue({ onViewHistory }: Props) {
   const [corrections, setCorrections] = useState<ListingCorrection[]>([]);
+  const [status, setStatus] = useState('pending');
+  const [correctionType, setCorrectionType] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -65,10 +67,10 @@ export default function CorrectionsQueue({ onViewHistory }: Props) {
   const load = useCallback(() => {
     setError(null);
     adminApi
-      .correctionsList('pending')
+      .correctionsList(status, correctionType || undefined)
       .then((res) => setCorrections(res.data))
       .catch((err) => setError(err.message));
-  }, []);
+  }, [status, correctionType]);
 
   useEffect(() => {
     load();
@@ -117,11 +119,26 @@ export default function CorrectionsQueue({ onViewHistory }: Props) {
 
   return (
     <div>
+      <div className="admin-filters">
+        <select className="admin-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All</option>
+        </select>
+        <select className="admin-select" value={correctionType} onChange={(e) => setCorrectionType(e.target.value)}>
+          <option value="">All types</option>
+          <option value="name">name</option>
+          <option value="dishes">dishes</option>
+          <option value="location">location</option>
+        </select>
+      </div>
+
       {error ? <p className="admin-error">{error}</p> : null}
       {message ? <p className="admin-success">{message}</p> : null}
 
       {corrections.length === 0 ? (
-        <p>No pending corrections.</p>
+        <p>No corrections match these filters.</p>
       ) : (
         <div className="admin-table-wrap">
           <table className="admin-table">
@@ -130,8 +147,10 @@ export default function CorrectionsQueue({ onViewHistory }: Props) {
                 <th>Listing</th>
                 <th>Type</th>
                 <th>Change</th>
+                <th>Submitted by</th>
                 <th>Note from submitter</th>
                 <th>Submitted</th>
+                <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -143,23 +162,42 @@ export default function CorrectionsQueue({ onViewHistory }: Props) {
                   <td>
                     <CorrectionDiff c={c} />
                   </td>
+                  <td>{c.profiles?.display_name ?? c.created_by}</td>
                   <td className="admin-correction-diff">{c.submitter_note ?? '—'}</td>
                   <td>{new Date(c.created_at).toLocaleString()}</td>
+                  <td>
+                    {c.status === 'pending' ? (
+                      'Pending'
+                    ) : (
+                      <div className="admin-correction-diff">
+                        <div>
+                          {c.status}
+                          {c.reviewed_by ? ` by ${c.reviewed_by}` : ''}
+                        </div>
+                        {c.reviewed_at ? <div>{new Date(c.reviewed_at).toLocaleString()}</div> : null}
+                        {c.rejection_reason ? <div>&quot;{c.rejection_reason}&quot;</div> : null}
+                      </div>
+                    )}
+                  </td>
                   <td className="admin-actions">
-                    <button
-                      className="admin-button admin-button-small"
-                      disabled={busyKey === `${c.id}::approve`}
-                      onClick={() => approve(c)}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      className="admin-button admin-button-small admin-button-secondary"
-                      disabled={busyKey === `${c.id}::reject`}
-                      onClick={() => startReject(c)}
-                    >
-                      Reject
-                    </button>
+                    {c.status === 'pending' ? (
+                      <>
+                        <button
+                          className="admin-button admin-button-small"
+                          disabled={busyKey === `${c.id}::approve`}
+                          onClick={() => approve(c)}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="admin-button admin-button-small admin-button-secondary"
+                          disabled={busyKey === `${c.id}::reject`}
+                          onClick={() => startReject(c)}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
                     <button className="admin-button admin-button-small admin-button-secondary" onClick={() => onViewHistory(c.listing_id)}>
                       History
                     </button>

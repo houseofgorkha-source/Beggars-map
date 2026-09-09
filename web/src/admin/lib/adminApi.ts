@@ -84,7 +84,7 @@ export type AuditEntry = {
   actor_type: 'admin' | 'discovery_pipeline';
   actor_label: string;
   action: string;
-  target_type: 'listing' | 'report';
+  target_type: 'listing' | 'report' | 'listing_correction' | 'listing_review';
   target_id: string;
   before_state: unknown;
   after_state: unknown;
@@ -129,6 +129,34 @@ export type ListingCorrection = {
     longitude: number;
     location_label: string | null;
   } | null;
+  // The submitter's own identity, joined via created_by -> profiles.id.
+  // null only if the profile itself was since deleted (account deletion) —
+  // callers should fall back to the raw created_by uuid in that case.
+  profiles: { display_name: string } | null;
+};
+
+// A community review (listing_reviews, 0022) plus its photos
+// (listing_review_photos) — the shape admin-corrections' listReviews
+// action returns, for both the global Reviews queue and a single
+// listing's own Reviews section.
+export type ListingReviewPhoto = {
+  id: string;
+  photo_url: string;
+  storage_path: string;
+  position: number;
+};
+
+export type ListingReview = {
+  id: string;
+  listing_id: string;
+  created_by: string;
+  rating: number | null;
+  review_text: string | null;
+  created_at: string;
+  updated_at: string;
+  listings: { name: string } | null;
+  profiles: { display_name: string } | null;
+  listing_review_photos: ListingReviewPhoto[];
 };
 
 export type ListingFilters = {
@@ -148,6 +176,8 @@ export type DashboardStats = {
   archivedListings: number;
   unreviewedListings: number;
   pendingReportGroups: number;
+  pendingCorrections: number;
+  totalReviews: number;
   bySource: Record<string, number>;
   recentActivity: AuditEntry[];
 };
@@ -187,7 +217,20 @@ export const adminApi = {
     }),
 
   listingsGet: (listingId: string) =>
-    invoke<{ data: { listing: Listing; photos: ListingPhoto[]; auditHistory: AuditEntry[] } }>('admin-listings', {
+    invoke<{
+      data: {
+        listing: Listing;
+        photos: ListingPhoto[];
+        auditHistory: AuditEntry[];
+        // Correction approve/reject and review-deletion audit rows for
+        // this listing — filed under target_type='listing_correction'/
+        // 'listing_review' rather than this listing's own id, so they
+        // can't come back inside auditHistory itself. See admin-listings'
+        // `get` action for how these are found.
+        correctionHistory: AuditEntry[];
+        reviewHistory: AuditEntry[];
+      };
+    }>('admin-listings', {
       action: 'get',
       listingId,
     }),
@@ -224,12 +267,21 @@ export const adminApi = {
     invoke<{ success: true }>('admin-dashboard', { action: 'updateSetting', key, value }),
 
   // status defaults to 'pending' server-side when omitted — pass 'all' for
-  // a lightweight history view alongside the active queue.
-  correctionsList: (status?: string) =>
-    invoke<{ data: ListingCorrection[] }>('admin-corrections', { action: 'list', status }),
+  // a lightweight history view alongside the active queue. correctionType
+  // (name/dishes/location) is an additional, independent filter.
+  correctionsList: (status?: string, correctionType?: string) =>
+    invoke<{ data: ListingCorrection[] }>('admin-corrections', { action: 'list', status, correctionType }),
   correctionsApprove: (correctionId: string) =>
     invoke<{ success: true }>('admin-corrections', { action: 'approve', correctionId }),
   correctionsReject: (correctionId: string, reason: string) =>
     invoke<{ success: true }>('admin-corrections', { action: 'reject', correctionId, reason }),
-  reviewsDelete: (reviewId: string) => invoke<{ success: true }>('admin-corrections', { action: 'deleteReview', reviewId }),
+
+  // listingId -> that listing's own reviews, unpaginated (ListingDetail's
+  // Reviews section). Omitted -> the global paginated Reviews queue.
+  reviewsList: (opts: { listingId?: string; page?: number; pageSize?: number }) =>
+    invoke<{ data: ListingReview[]; total: number }>('admin-corrections', { action: 'listReviews', ...opts }),
+  // reason is required server-side — every deletion must explain itself in
+  // the audit trail, same posture as correctionsReject above.
+  reviewsDelete: (reviewId: string, reason: string) =>
+    invoke<{ success: true }>('admin-corrections', { action: 'deleteReview', reviewId, reason }),
 };

@@ -56,11 +56,18 @@ export default function AuditLog({ initialFilters, onOpenListing }: Props) {
           <option value="archive">archive</option>
           <option value="unarchive">unarchive</option>
           <option value="resolve_report">resolve_report</option>
+          <option value="mark_reviewed">mark_reviewed</option>
+          <option value="mark_unreviewed">mark_unreviewed</option>
+          <option value="approve_correction">approve_correction</option>
+          <option value="reject_correction">reject_correction</option>
+          <option value="delete_review">delete_review</option>
         </select>
         <select className="admin-select" value={filters.targetType ?? ''} onChange={(e) => updateFilter('targetType', e.target.value || undefined)}>
           <option value="">All target types</option>
           <option value="listing">listing</option>
           <option value="report">report</option>
+          <option value="listing_correction">listing_correction</option>
+          <option value="listing_review">listing_review</option>
         </select>
         {filters.targetId ? (
           <span className="admin-badge">
@@ -99,8 +106,18 @@ export default function AuditLog({ initialFilters, onOpenListing }: Props) {
                       listing · {entry.target_id.slice(0, 8)}…
                     </button>
                   ) : (
+                    // report / listing_correction / listing_review all
+                    // render plainly, correctly labeled by their own
+                    // target_type — this used to hardcode "report" here,
+                    // mislabeling every correction/review audit row.
+                    // No click-through for these: unlike a listing id, a
+                    // correction/review id doesn't resolve to an admin
+                    // view of its own, and before_state's shape isn't
+                    // consistent enough to safely derive a listing id from
+                    // it here (ListingDetail's own history section does
+                    // that properly, server-side, instead).
                     <span>
-                      report · {entry.target_id.slice(0, 8)}…
+                      {entry.target_type} · {entry.target_id.slice(0, 8)}…
                     </span>
                   )}
                 </td>
