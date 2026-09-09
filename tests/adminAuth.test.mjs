@@ -72,7 +72,7 @@ function ensureFixtureUsers() {
   }
 }
 
-const FUNCTIONS = ['admin-listings', 'admin-dashboard', 'admin-reports'];
+const FUNCTIONS = ['admin-listings', 'admin-dashboard', 'admin-reports', 'admin-corrections'];
 
 describe('Admin auth boundary (401 / 403 / 200)', { skip: !stackReachable && 'local Supabase stack not reachable at 127.0.0.1:54321' }, () => {
   let adminJwt;

@@ -102,6 +102,35 @@ export type ReportGroup = {
   isHidden: boolean;
 };
 
+// A user-proposed name/dishes/location correction (0023) — see
+// admin-corrections' own `list` action for the exact shape, including the
+// embedded `listings` row (current values, for a side-by-side diff).
+export type ListingCorrection = {
+  id: string;
+  listing_id: string;
+  created_by: string;
+  correction_type: 'name' | 'dishes' | 'location';
+  proposed_name: string | null;
+  proposed_dishes: { dish: string; price: number }[] | null;
+  proposed_latitude: number | null;
+  proposed_longitude: number | null;
+  proposed_location_label: string | null;
+  submitter_note: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  listings: {
+    name: string;
+    dishes: { dish: string; price: number }[] | null;
+    price_rupees: number;
+    latitude: number;
+    longitude: number;
+    location_label: string | null;
+  } | null;
+};
+
 export type ListingFilters = {
   source?: string;
   verificationStatus?: string;
@@ -193,4 +222,14 @@ export const adminApi = {
   getSettings: () => invoke<{ data: Record<string, unknown> }>('admin-dashboard', { action: 'getSettings' }),
   updateSetting: (key: string, value: boolean) =>
     invoke<{ success: true }>('admin-dashboard', { action: 'updateSetting', key, value }),
+
+  // status defaults to 'pending' server-side when omitted — pass 'all' for
+  // a lightweight history view alongside the active queue.
+  correctionsList: (status?: string) =>
+    invoke<{ data: ListingCorrection[] }>('admin-corrections', { action: 'list', status }),
+  correctionsApprove: (correctionId: string) =>
+    invoke<{ success: true }>('admin-corrections', { action: 'approve', correctionId }),
+  correctionsReject: (correctionId: string, reason: string) =>
+    invoke<{ success: true }>('admin-corrections', { action: 'reject', correctionId, reason }),
+  reviewsDelete: (reviewId: string) => invoke<{ success: true }>('admin-corrections', { action: 'deleteReview', reviewId }),
 };

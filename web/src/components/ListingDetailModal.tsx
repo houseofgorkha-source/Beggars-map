@@ -286,26 +286,27 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
         <span className="compact-meta">
           <span className="compact-posted">{formatRelativeTime(listing.created_at)}</span>
           {/* Added into the existing inline meta row, not as new rows, so
-              the popup card keeps its current height and shape. Both are
-              omitted when the listing has neither. */}
+              the popup card keeps its current height and shape. Omitted
+              when the listing has no rating of its own. */}
           {listing.rating != null ? (
             <span className="compact-rating" aria-label={`Rated ${listing.rating} out of 5`}>
               {'★'.repeat(listing.rating)}
             </span>
           ) : null}
-          {listing.note ? (
-            <button
-              className="compact-review-link"
-              onClick={(e) => {
-                // This card sits inside the map's marker popup — a click
-                // must not bubble out to the map/marker handlers beneath.
-                e.stopPropagation();
-                setShowReview(true);
-              }}
-            >
-              Review
-            </button>
-          ) : null}
+          {/* Always shown, not gated on listing.note any more — it's now
+              also the entry point to read/add community reviews (0022),
+              which can exist even when the listing itself has no note. */}
+          <button
+            className="compact-review-link"
+            onClick={(e) => {
+              // This card sits inside the map's marker popup — a click
+              // must not bubble out to the map/marker handlers beneath.
+              e.stopPropagation();
+              setShowReview(true);
+            }}
+          >
+            Review
+          </button>
           {distanceKm != null ? <span className="compact-distance">{distanceKm.toFixed(1)} km away</span> : null}
         </span>
         <div className="compact-actions">
@@ -355,11 +356,16 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
         />
       ) : null}
 
-      {showReview && listing.note ? (
+      {showReview ? (
         <ReviewOverlay
+          listingId={listing.id}
           listingName={listing.name}
           review={listing.note}
           rating={listing.rating}
+          priceRupees={listing.price_rupees}
+          dishes={listing.dishes}
+          latitude={listing.latitude}
+          longitude={listing.longitude}
           onClose={() => setShowReview(false)}
         />
       ) : null}

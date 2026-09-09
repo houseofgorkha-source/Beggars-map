@@ -253,6 +253,25 @@ export default function App() {
     token: number;
     source: 'manual' | 'current-location';
   } | null>(null);
+  // Same shape as pickedLocation above, but for the "suggest a location
+  // correction" flow inside ReviewOverlay (Phase 3) — kept as a genuinely
+  // separate result-holder rather than overloading pickedLocation itself,
+  // since the two consumers (AddListingModal vs. ReviewOverlay) are
+  // rendered from different places and must never race to overwrite each
+  // other's confirmed pick. pickingPurpose below is what makes
+  // confirmAddThisPlace route a confirmed pick to the right one.
+  const [correctionPickedLocation, setCorrectionPickedLocation] = useState<{
+    lat: number;
+    lon: number;
+    token: number;
+  } | null>(null);
+  // Which flow started picking mode — Add Listing (the original, only
+  // consumer until Phase 3) or a listing correction's "Adjust on map".
+  // Reusing the same pickingLocation/confirm/cancel machinery for both
+  // means this is the one extra bit of state needed to route a confirmed
+  // pick to the correct result-holder, rather than duplicating the whole
+  // picking flow a second time.
+  const [pickingPurpose, setPickingPurpose] = useState<'addListing' | 'correction'>('addListing');
   // Which action started picking mode — changes the explanatory dialogue's
   // copy below (a plain "tap the map" prompt vs. explicitly asking the
   // user to confirm their GPS fix before it's applied).
@@ -996,6 +1015,7 @@ export default function App() {
     setShowAdd(false);
     setAddInitialCoords(undefined);
     setPickedLocation(null);
+    setCorrectionPickedLocation(null);
     setPickingLocation(false);
     setPickingDialogDismissed(false);
     setSearchPin(null);
@@ -1031,8 +1051,21 @@ export default function App() {
   // list is open has nothing of the app's own to consume and falls straight
   // through to real browser back navigation (exiting the site instead of
   // just collapsing the sheet back to MAP mode).
+  // pickingLocation is redundant with showAdd for the addListing purpose
+  // (already covered) but load-bearing for the correction purpose — a
+  // correction's "Adjust on map" has no other open-state of its own to ride
+  // along on (reviewListingId/showReview aren't part of this disjunction at
+  // all; see the note on reviewListingId's declaration), so without this a
+  // back-press mid-pick would fall straight through to real browser
+  // navigation and exit the site instead of just cancelling the pick.
   const hasOpenState =
-    showAdd || legalTab !== null || showAbout || selectedListingId !== null || trimmedQuery.length > 0 || sheetState === 'list';
+    showAdd ||
+    legalTab !== null ||
+    showAbout ||
+    selectedListingId !== null ||
+    trimmedQuery.length > 0 ||
+    sheetState === 'list' ||
+    pickingLocation;
 
   // Keeps one browser-history entry in sync with hasOpenState so back/
   // side-swipe closes an internal view instead of leaving the site — this
@@ -1103,8 +1136,13 @@ export default function App() {
   // location, if it had one, so refining an existing pick starts from
   // there instead of a blank map. `source` just picks which copy the
   // explanatory dialogue below shows.
-  function startPickingLocation(current: { lat: number; lon: number } | null, source: 'manual' | 'current-location' = 'manual') {
+  function startPickingLocation(
+    current: { lat: number; lon: number } | null,
+    source: 'manual' | 'current-location' = 'manual',
+    purpose: 'addListing' | 'correction' = 'addListing'
+  ) {
     setPickingLocation(true);
+    setPickingPurpose(purpose);
     setPickingSource(source);
     setPickingDialogDismissed(false);
     // Picking a location fundamentally needs the map visible and tappable —
@@ -1132,7 +1170,11 @@ export default function App() {
   function confirmAddThisPlace() {
     if (!searchPin) return;
     if (pickingLocation) {
-      setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1, source: pickingSource }));
+      if (pickingPurpose === 'correction') {
+        setCorrectionPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1 }));
+      } else {
+        setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1, source: pickingSource }));
+      }
       setPickingLocation(false);
       setPickingDialogDismissed(false);
       setSearchPin(null);
@@ -1471,29 +1513,31 @@ export default function App() {
                     <div className="list-card-footer">
                       <span className="list-card-meta">
                         <span className="list-card-votes">▲ {listing.voteCount}</span>
-                        {/* Rating and Review slot into this existing inline
-                            meta row rather than adding rows of their own, so
-                            the card keeps its exact height and layout. Both
-                            are omitted entirely when the listing has neither
-                            — never a placeholder or an empty-state string. */}
+                        {/* Rating slots into this existing inline meta row
+                            rather than adding a row of its own, so the card
+                            keeps its exact height and layout. Omitted
+                            entirely when the listing has none — never a
+                            placeholder or an empty-state string. */}
                         {listing.rating != null ? (
                           <span className="list-card-rating" aria-label={`Rated ${listing.rating} out of 5`}>
                             {'★'.repeat(listing.rating)}
                           </span>
                         ) : null}
-                        {listing.note ? (
-                          <button
-                            className="list-card-review-link"
-                            onClick={(e) => {
-                              // The card itself selects the listing on click;
-                              // opening the review must not also do that.
-                              e.stopPropagation();
-                              setReviewListingId(listing.id);
-                            }}
-                          >
-                            Review
-                          </button>
-                        ) : null}
+                        {/* Always shown, not gated on listing.note any more
+                            — it's now also the entry point to read/add
+                            community reviews (0022), which can exist even
+                            when the listing itself has no note. */}
+                        <button
+                          className="list-card-review-link"
+                          onClick={(e) => {
+                            // The card itself selects the listing on click;
+                            // opening the review must not also do that.
+                            e.stopPropagation();
+                            setReviewListingId(listing.id);
+                          }}
+                        >
+                          Review
+                        </button>
                         {listing.distanceKm != null ? (
                           <span className="list-card-distance">{listing.distanceKm.toFixed(1)} km away</span>
                         ) : null}
@@ -1534,11 +1578,19 @@ export default function App() {
           card renders its own instance (see ListingDetailModal) so that
           MapView's props — and its documented marker-rebuild effect — stay
           untouched. */}
-      {reviewListing && reviewListing.note ? (
+      {reviewListing ? (
         <ReviewOverlay
+          listingId={reviewListing.id}
           listingName={reviewListing.name}
           review={reviewListing.note}
           rating={reviewListing.rating}
+          priceRupees={reviewListing.price_rupees}
+          dishes={reviewListing.dishes}
+          latitude={reviewListing.latitude}
+          longitude={reviewListing.longitude}
+          onPickOnMap={(current, source) => startPickingLocation(current, source, 'correction')}
+          pickedLocation={correctionPickedLocation}
+          hidden={pickingLocation}
           onClose={() => setReviewListingId(null)}
         />
       ) : null}

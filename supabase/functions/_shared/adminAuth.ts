@@ -91,13 +91,16 @@ export type AuditAction =
   | 'unarchive'
   | 'resolve_report'
   | 'mark_reviewed'
-  | 'mark_unreviewed';
+  | 'mark_unreviewed'
+  | 'approve_correction'
+  | 'reject_correction'
+  | 'delete_review';
 
 export type AuditEntry = {
   actor_type: 'admin' | 'discovery_pipeline';
   actor_label: string;
   action: AuditAction;
-  target_type: 'listing' | 'report';
+  target_type: 'listing' | 'report' | 'listing_correction' | 'listing_review';
   target_id: string;
   before_state?: unknown;
   after_state?: unknown;

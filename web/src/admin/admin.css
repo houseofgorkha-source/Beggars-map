@@ -167,6 +167,28 @@ body {
   min-height: 300px;
 }
 
+/* Corrections queue */
+
+.admin-correction-diff {
+  white-space: normal;
+  max-width: 320px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.admin-reject-inline {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.admin-reject-inline .admin-input {
+  flex: 1;
+  min-width: 160px;
+}
+
 /* Dashboard tiles */
 
 .admin-tiles {

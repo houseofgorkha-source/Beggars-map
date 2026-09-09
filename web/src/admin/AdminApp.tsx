@@ -5,11 +5,12 @@ import Dashboard from './views/Dashboard';
 import ListingsList from './views/ListingsList';
 import ListingDetail from './views/ListingDetail';
 import ReportsQueue from './views/ReportsQueue';
+import CorrectionsQueue from './views/CorrectionsQueue';
 import AuditLog from './views/AuditLog';
 import { adminApi, AuditLogFilters, ListingFilters } from './lib/adminApi';
 
 type AuthState = 'checking' | 'signed-out' | 'not-authorized' | 'authorized';
-type View = 'dashboard' | 'listings' | 'listing-detail' | 'reports' | 'audit';
+type View = 'dashboard' | 'listings' | 'listing-detail' | 'reports' | 'corrections' | 'audit';
 
 export default function AdminApp() {
   const [session, setSession] = useState<Session | null>(null);
@@ -80,6 +81,9 @@ export default function AdminApp() {
   function goReports() {
     setView('reports');
   }
+  function goCorrections() {
+    setView('corrections');
+  }
   function goAudit(filters: AuditLogFilters = {}) {
     setAuditFilters(filters);
     setNavKey((k) => k + 1);
@@ -146,6 +150,9 @@ export default function AdminApp() {
         <button className={`admin-nav-tab ${view === 'reports' ? 'admin-nav-tab-active' : ''}`} onClick={goReports}>
           Reports
         </button>
+        <button className={`admin-nav-tab ${view === 'corrections' ? 'admin-nav-tab-active' : ''}`} onClick={goCorrections}>
+          Corrections
+        </button>
         <button className={`admin-nav-tab ${view === 'audit' ? 'admin-nav-tab-active' : ''}`} onClick={() => goAudit({})}>
           Audit Log
         </button>
@@ -165,6 +172,8 @@ export default function AdminApp() {
         {view === 'reports' ? (
           <ReportsQueue adminEmail={adminEmail} onViewHistory={(listingId) => goAudit({ targetId: listingId })} />
         ) : null}
+
+        {view === 'corrections' ? <CorrectionsQueue onViewHistory={(listingId) => goAudit({ targetId: listingId })} /> : null}
 
         {view === 'audit' ? <AuditLog key={navKey} initialFilters={auditFilters} onOpenListing={openListing} /> : null}
       </div>

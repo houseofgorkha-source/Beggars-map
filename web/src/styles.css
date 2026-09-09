@@ -2630,12 +2630,25 @@ body {
   padding: 24px 16px;
 }
 
+/* Bounded to the viewport, with exactly ONE scrolling region inside it
+   (.review-overlay-body below) — not the card itself. A flex column with
+   overflow: hidden on the card means nothing (a long name, a long dish
+   list, a nested form) can ever visually escape the card's own rounded
+   corners; only .review-overlay-body scrolls, and the head stays pinned
+   above it. This card also never contains a second independent
+   fixed-position overlay of its own (see ReviewOverlay.tsx's own header
+   comment) — that was the actual cause of a real overflow bug in an
+   earlier pass (a nested modal with its own scroll container, stacked on
+   top of this one), not something CSS alone needed to work around. */
 .review-overlay-card {
   background: #fff;
   border-radius: 12px;
-  padding: 18px 20px;
   max-width: min(420px, 92vw);
   width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .review-overlay-head {
@@ -2643,12 +2656,33 @@ body {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  padding: 18px 20px 14px;
+  flex-shrink: 0;
+}
+
+/* The one scroll container. min-height: 0 is load-bearing, not decorative:
+   a flex child's default min-height is auto (effectively its content's
+   natural height), which lets it grow past the flex container's own
+   max-height instead of actually scrolling — this single line is what
+   makes overflow-y: auto here do anything at all. overflow-x: hidden is a
+   second, independent guard against a long unbroken string (a dish name
+   with no spaces, say) pushing the layout wider than the card — paired
+   with overflow-wrap: break-word on the text values below, so such a
+   string wraps instead of being clipped or escaping sideways. */
+.review-overlay-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 20px 20px;
 }
 
 .review-overlay-name {
   font-size: 15px;
   font-weight: 700;
   color: #222;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .review-overlay-rating {
@@ -2664,17 +2698,200 @@ body {
   line-height: 1.5;
   color: #444;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
-.review-overlay-close {
+/* One wrapper per section ("From the listing" / "Your review" / "Reviews
+   from others") — a top border + spacing separates them without needing a
+   heavier card-within-a-card treatment. */
+.review-overlay-section {
   margin-top: 16px;
-  width: 100%;
-  padding: 9px;
-  border: none;
-  border-radius: 8px;
-  background: var(--pink-accent);
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.review-overlay-section:first-of-type {
+  margin-top: 14px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.review-overlay-caption {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #999;
+}
+
+.review-mine {
+  margin-top: 8px;
+}
+
+/* Page 2's own way back to page 1 without submitting or closing the whole
+   overlay — sits above "Restaurant name", the first thing on that page. */
+.review-back-link {
+  display: block;
+  margin-top: 14px;
+}
+
+/* Restaurant name / Location's read-only row: the current (or, once
+   Saved, the locally-staged proposed) value on the left, the "Edit X"
+   toggle on the right. min-width: 0 + overflow-wrap on the value is the
+   same flex-shrink-and-wrap pattern as .review-overlay-name, needed for
+   the same reason (a long name/address must wrap, not push the edit link
+   off the card or force horizontal scroll). */
+.review-field-readonly {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.review-field-value {
+  font-size: 14px;
+  color: #333;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+/* The inline editor each of the three correction sections swaps in for
+   .review-field-readonly while editing — just spacing, the actual inputs
+   reuse .text-input/DishPriceRows/.pinned-banner unchanged. */
+.correction-form {
+  margin-top: 8px;
+}
+
+.review-field-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.review-field-actions .primary-button,
+.review-field-actions .secondary-button {
+  flex: 1;
+}
+
+.review-dish-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.review-dish-row {
+  font-size: 14px;
+  color: #333;
+  overflow-wrap: break-word;
+}
+
+.review-confirmation {
+  margin: 10px 0 0;
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--pink-accent);
+}
+
+.review-empty-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #999;
+}
+
+.review-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-item {
+  padding-top: 12px;
+  border-top: 1px solid #f2f2f2;
+}
+
+.review-item:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.review-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.review-item-stars {
+  color: var(--pink-accent);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.review-item-time {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.review-item-text {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #444;
+  white-space: pre-wrap;
+}
+
+.review-item-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.review-item-photo {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+.review-item-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Fades the read-view out while the unified Add Review form (a nested
+   AddListingModal, mode="review") is open on top of it, same treatment as
+   .modal-backdrop-hidden — kept mounted (not unmounted) so state like the
+   loaded review list survives the round trip back. */
+.review-overlay-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.review-overlay-footer {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.review-overlay-footer .submit-button {
+  width: 100%;
+}
+
+/* The "rating/review/photos publish immediately, corrections go to admin
+   review" notice shown only in AddListingModal's review mode — same
+   .field-hint sizing/color as every other form hint, just given room to
+   wrap across two lines instead of sitting inline after one field. */
+.review-mode-notice {
+  margin: 4px 0 10px;
+  line-height: 1.4;
 }

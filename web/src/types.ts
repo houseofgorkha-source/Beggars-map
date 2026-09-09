@@ -40,3 +40,8 @@ export type ListingPhoto = {
   position: number;
   created_at: string;
 };
+
+// Re-exported from lib/reviews.ts so components can import the shape from
+// either place — the canonical definition lives there, alongside the
+// queries that produce it.
+export type { ListingReview } from './lib/reviews';

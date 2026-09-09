@@ -90,6 +90,16 @@ export function minDishPrice(entries: DishEntry[]): number | null {
 
 export type DishDraft = { dish: string; price: string };
 
+// The inverse of what submission produces — turns a listing's existing
+// structured entries back into editable draft rows, for pre-filling a form
+// (the Add Review flow's dishes-correction section). A listing with no
+// dishes yet (entries.length === 0) still needs one blank row to render,
+// matching the form's own "always at least one row" starting state.
+export function dishEntriesToDrafts(entries: DishEntry[]): DishDraft[] {
+  if (entries.length === 0) return [{ dish: '', price: '' }];
+  return entries.map((e) => ({ dish: e.dish, price: String(e.price) }));
+}
+
 export const PRICE_RANGE_ERROR = `Price must be between ₹${MIN_DISH_PRICE} and ₹${MAX_DISH_PRICE}.`;
 
 export type DishValidation =
