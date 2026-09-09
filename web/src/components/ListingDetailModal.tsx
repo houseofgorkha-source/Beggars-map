@@ -3,7 +3,6 @@ import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { fetchListing, fetchVoteCount, hasUserVoted, toggleVote as toggleVoteRequest, reportListing as reportListingRequest, deleteListing as deleteListingRequest } from '../lib/listings';
 import { formatRelativeTime } from '../lib/relativeTime';
 import PhotoLightbox from './PhotoLightbox';
-import ReviewOverlay from './ReviewOverlay';
 import { parseDishes, formatDishes } from '../lib/dishes';
 import type { Listing, ListingPhoto } from '../types';
 
@@ -17,6 +16,17 @@ type Props = {
   // location permission, or not passed at all) simply omits it, same as
   // native mobile's own graceful fallback.
   distanceKm?: number | null;
+  // The "Review" button delegates to the caller instead of owning a local
+  // ReviewOverlay instance — this component (the map's marker popup, see
+  // MapView.tsx) gets unmounted whenever a location is being picked
+  // (MapView's hidePopup/selectedListingId=null), which would otherwise
+  // destroy any in-progress review/correction draft the moment "Pick on
+  // map" was pressed. App.tsx owns the one ReviewOverlay instance instead
+  // (the same instance the list row's own "Review" link already used) —
+  // that instance lives in a component that never unmounts during a pick,
+  // so it survives the round trip via its existing `hidden` fade-not-
+  // unmount treatment. See ReviewOverlay.tsx's own header for that part.
+  onOpenReview?: (listingId: string) => void;
 };
 
 const REPORT_REASONS = ["Closed / doesn't exist", 'Wrong price', 'Inappropriate photo', 'Spam or duplicate'];
@@ -64,7 +74,7 @@ function TrashIcon() {
 // ResizeObserver) to size the collapsed "map mode" sheet height around the
 // compact card's real rendered content.
 const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDetailModal(
-  { listingId, onClose, onUpdated, distanceKm },
+  { listingId, onClose, onUpdated, distanceKm, onOpenReview },
   ref
 ) {
   const [listing, setListing] = useState<Listing | null>(null);
@@ -73,7 +83,6 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
   // working untouched. See `photos` below for how the two are merged.
   const [extraPhotos, setExtraPhotos] = useState<ListingPhoto[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [showReview, setShowReview] = useState(false);
   const [voteCount, setVoteCount] = useState(0);
   const [hasVoted, setHasVoted] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -302,7 +311,7 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
               // This card sits inside the map's marker popup — a click
               // must not bubble out to the map/marker handlers beneath.
               e.stopPropagation();
-              setShowReview(true);
+              onOpenReview?.(listing.id);
             }}
           >
             Review
@@ -353,20 +362,6 @@ const ListingDetailModal = forwardRef<HTMLDivElement, Props>(function ListingDet
           startIndex={lightboxIndex}
           listingName={listing.name}
           onClose={() => setLightboxIndex(null)}
-        />
-      ) : null}
-
-      {showReview ? (
-        <ReviewOverlay
-          listingId={listing.id}
-          listingName={listing.name}
-          review={listing.note}
-          rating={listing.rating}
-          priceRupees={listing.price_rupees}
-          dishes={listing.dishes}
-          latitude={listing.latitude}
-          longitude={listing.longitude}
-          onClose={() => setShowReview(false)}
         />
       ) : null}
     </div>

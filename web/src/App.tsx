@@ -1319,6 +1319,7 @@ export default function App() {
               selectedListingId={pickingLocation ? null : selectedListingId}
               onClosePopup={resetToHome}
               onListingUpdated={load}
+              onOpenReview={setReviewListingId}
               hidePopup={pickingLocation}
               selectedDistanceKm={
                 // Shown on every breakpoint, not just mobile portrait. Still
@@ -1574,10 +1575,16 @@ export default function App() {
       ) : null}
       {legalTab ? <LegalModal initialTab={legalTab} onClose={resetToHome} /> : null}
       {showAbout ? <AboutModal onClose={resetToHome} /> : null}
-      {/* Opened by the list card's "Review" link. The map popup's compact
-          card renders its own instance (see ListingDetailModal) so that
-          MapView's props — and its documented marker-rebuild effect — stay
-          untouched. */}
+      {/* The single ReviewOverlay instance for BOTH entry points — the list
+          card's own "Review" link (setReviewListingId directly) and the map
+          popup's "Review" link (routed here via MapView's onOpenReview ->
+          ListingDetailModal, since App.tsx is the one component guaranteed
+          not to unmount while a location is being picked; see
+          ListingDetailModal.tsx's onOpenReview doc for why a popup-local
+          instance couldn't survive that). MapView's props and its
+          documented marker-rebuild effect are untouched either way — this
+          overlay's own open/close state was already independent of
+          selectedListingId/the popup's own lifecycle. */}
       {reviewListing ? (
         <ReviewOverlay
           listingId={reviewListing.id}

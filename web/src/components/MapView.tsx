@@ -36,6 +36,12 @@ type Props = {
   // listing) so the caller's own listings reload the same way it already
   // does for the side-panel's card.
   onListingUpdated?: () => void;
+  // Forwarded to the popup card's "Review" button — the caller (App.tsx)
+  // owns the actual ReviewOverlay instance (see ListingDetailModal.tsx's
+  // own header comment for why: that overlay must survive this popup
+  // unmounting during a location pick, which a popup-local instance
+  // cannot).
+  onOpenReview?: (listingId: string) => void;
   // Only ever true while the caller is in the "pick a location for a new
   // listing" flow, where selection is repurposed for placing a pin rather
   // than browsing — the popup would be meaningless (and confusing) mid-pick.
@@ -58,6 +64,7 @@ export default function MapView({
   selectedListingId,
   onClosePopup,
   onListingUpdated,
+  onOpenReview,
   hidePopup,
   selectedDistanceKm,
 }: Props) {
@@ -587,6 +594,7 @@ export default function MapView({
               distanceKm={selectedDistanceKm ?? null}
               onClose={() => onClosePopup?.()}
               onUpdated={onListingUpdated}
+              onOpenReview={onOpenReview}
             />
           </div>
         </div>

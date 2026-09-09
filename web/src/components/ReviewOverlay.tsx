@@ -34,11 +34,12 @@ type Props = {
   dishes: unknown;
   latitude: number;
   longitude: number;
-  // Both left undefined at the map-popup-triggered call site — the popup
-  // has no access to App.tsx's picking-location machinery without touching
-  // fragile, already-documented popup-unmount behavior outside this
-  // feature's scope (see MapView.tsx's hidePopup). "Edit location" simply
-  // doesn't render there; name/dishes editing still work.
+  // Always passed by the one call site (App.tsx) regardless of which entry
+  // point opened this overlay (list row or map-pin popup, routed here via
+  // MapView's onOpenReview) — both `hidden`/`hidePopup: pickingLocation`,
+  // so this overlay fades rather than unmounts during a pick, same as
+  // before. Optional in the type only because that's easy/cheap to keep
+  // true; there is no longer a call site that omits them.
   onPickOnMap?: (current: { lat: number; lon: number } | null, source?: 'manual' | 'current-location') => void;
   pickedLocation?: { lat: number; lon: number; token: number } | null;
   // True while the caller is mid-pick on the full-screen map — fades this
