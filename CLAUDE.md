@@ -66,6 +66,43 @@ This stage is primarily driven by Google Maps rendering usage/cost approaching t
 
 Stage 2A is complete foundation work. Stage 2B and Stage 3 are future stages and must remain separately scoped. Do not infer missing requirements or begin either stage without explicit approval.
 
+# Community Reviews + Listing Corrections (Phase 2 + Phase 3, as of 2026-09-09) — LOCAL ONLY, not deployed
+
+Built and committed (`a161751`, not yet pushed as of this writing — check "Latest relevant commits" below for current push status), but **nothing in this feature has touched production**: migrations 0022-0024 are local-only, the `admin-corrections` Edge Function has never been deployed, and no production `listings`/`listing_reviews`/`listing_corrections` row has ever been written by this work. Read this section before starting Phase 4 or any production deployment of this feature.
+
+## What this is
+
+Clicking "Review" on a listing (list row or map popup, same as before) now opens a two-page overlay instead of the old read-only note/rating display:
+
+- **Page 1 (default, read-only)** — "From the listing" (the creator's own note, or the price if there's no note — never blank), "Your review" (only if the current anonymous session already has one), "Reviews from others", and one bottom button: **"Add Review"** if the session has no review yet, **"Edit Review"** if it does.
+- **Page 2 (opened by that button)** — Restaurant name / Dishes & prices / Location, each shown **read-only with an "Edit X" toggle** (editing reveals an inline editor with its own Save/Cancel; Save only stages the value locally, nothing is written yet), then Your rating / Your review / Photos (always directly editable, no toggle), then one **"Submit Review"** button. A "← Back" link returns to page 1 without submitting. Both pages share one unchanged header (restaurant name + close button).
+
+Submitting splits into two independent write paths, by design:
+- **Community content** (rating, review text, photos) → always an auto-published `listing_reviews` upsert (one row per listing per anonymous session, editable by its own owner, never overwritten by another user).
+- **Canonical corrections** (a *changed* name/dishes/location — unchanged fields create no row at all) → a `listing_corrections` row per changed field, `status: 'pending'`. **Nothing here ever writes to `listings` directly** — the public client has no RLS path to do that; the only way a correction reaches the canonical row is the new admin Corrections queue's **approve** action, via the `admin-corrections` Edge Function running as `service_role`.
+
+## Key files
+
+- Schema: `supabase/migrations/0022_listing_reviews.sql` (`listing_reviews`, `listing_review_photos`), `0023_listing_corrections.sql` (`listing_corrections`), `0024_audit_log_correction_actions.sql` (widens `admin_audit_log`'s `action`/`target_type` CHECK constraints for `approve_correction`/`reject_correction`/`delete_review` and `listing_correction`/`listing_review`).
+- Backend: `supabase/functions/admin-corrections/index.ts` (list/approve/reject/deleteReview), `_shared/listingActions.ts`'s new `applyListingCorrection`/`rejectListingCorrection` (the only code path that ever writes a correction into `listings`, with full before/after audit logging), `_shared/adminAuth.ts` (widened `AuditAction`/target-type unions).
+- Frontend: `web/src/components/ReviewOverlay.tsx` (the two-page overlay described above — this is where almost all the new UI logic lives), `web/src/components/DishPriceRows.tsx` (extracted from `AddListingModal.tsx` for reuse in the dishes-editing section), `web/src/lib/reviews.ts` / `reviewValidation.ts` / `corrections.ts` (data-access + pure validation).
+- Admin: `web/src/admin/views/CorrectionsQueue.tsx` (new nav tab — list pending corrections with a current-vs-proposed diff, Approve, or Reject with a required reason).
+- **`AddListingModal.tsx` is untouched** — after an earlier pass tried reusing it in a "review mode" and was explicitly reverted, it's back to being create-mode-only, byte-for-byte its pre-this-feature self (the one harmless diff is the `DishPriceRows` extraction, a pure markup move).
+
+## Deliberate scoping decision, not a bug
+
+"Edit location" (and the whole location-correction section) only appears when `ReviewOverlay` is opened from the **list row's own Review link** — not from the map popup's. The popup's `ListingDetailModal.tsx` unmounts while a location is being picked (`hidePopup` in `MapView.tsx`), which would silently discard an in-progress correction form; fixing that would mean touching fragile, already-documented popup-positioning/marker-rebuild logic outside this feature's scope, so it was deliberately left out of scope. Name and dishes corrections work identically from both entry points.
+
+## Verification already done (local only)
+
+Full `npm test` (423 passing — the only failures are pre-existing, out-of-scope Discovery Workbench tooling issues, unrelated), `tsc --noEmit` and `npm run build` clean on both migrations, plus repeated real-browser Playwright passes covering: per-field edit/save/cancel, the ₹30-₹100 dish validation still enforced on Save, the real map-picking round-trip, only-changed-fields-create-corrections (verified directly against the DB), the canonical `listings` row staying untouched after submit, two independent anonymous sessions never overwriting each other's review, Add Listing's own create flow being unaffected, and no CSS overflow on desktop or 390px mobile. None of this exercised production.
+
+## Not yet done — do this before/at the start of Phase 4 if corrections should go live
+
+- Migrations 0022-0024 have **not** been applied to production (same direct `supabase db query --linked` method every prior migration in this repo used — never a bare `db push`, see AGENTS.md's own migration-ledger caveats).
+- `admin-corrections` has **not** been deployed (`npx supabase functions deploy admin-corrections --project-ref nvingzluboafxzxgxxwc`, same convention as every other admin-* function).
+- No real interactive walkthrough of the admin Corrections queue has happened yet (needs a human's own Google OAuth session, same limitation as every other Admin v2 feature before it).
+
 # Current Project State (as of 2026-09-08)
 
 Concise, factual snapshot of what is actually true right now — kept separate from the roadmap above, which is durable/forward-looking. Full narrative and historical detail for everything below lives in AGENTS.md; this section exists so a fresh session can get oriented without reading that much longer log first. Verify against AGENTS.md and production directly before relying on this for anything consequential — it decays the same way any status snapshot does.
@@ -117,6 +154,7 @@ This is the exact sequence both Batch 3 and Batch 4 followed end to end and is t
 
 ## Latest relevant commits
 
+- `a161751` — feat: add community reviews and listing corrections (Phase 2 + Phase 3 — see the dedicated section above; local-only, not yet applied/deployed to production)
 - `758f5fc` — docs: add current project state snapshot to CLAUDE.md
 - `2cdab35` — fix: parse rupee-prefixed discovery prices correctly (the `minPriceFrom()` fix behind all 32 Batch 3 imports having correct, non-quantity prices)
 - `fe09249` — fix: add Select All checkbox to admin Listings table
