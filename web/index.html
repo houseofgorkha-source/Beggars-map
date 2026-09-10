@@ -49,12 +49,12 @@
     <meta name="google-site-verification" content="" />
     -->
 
-    <!-- Plausible — privacy-friendly, no cookie banner needed, free tier.
-         The script alone does nothing until beggarsmap.com is actually
-         added at https://plausible.io (or a self-hosted instance) — this
-         environment has no account to create that with. Once added,
-         events start flowing with no further code change. -->
-    <script defer data-domain="beggarsmap.com" src="https://plausible.io/js/script.js"></script>
+    <!-- Cloudflare Web Analytics + GA4 are loaded conditionally at runtime
+         by initAnalytics() (web/src/lib/analytics.ts, called from
+         main.tsx) — not as static tags here — so that either one is
+         skipped entirely when its env var isn't set, rather than loading
+         with a blank id. Set VITE_GA4_MEASUREMENT_ID /
+         VITE_CLOUDFLARE_BEACON_TOKEN in web/.env to enable. -->
 
     <link href="https://maps.googleapis.com" rel="preconnect" />
     <link href="https://maps.gstatic.com" rel="preconnect" crossorigin />
