@@ -42,3 +42,53 @@ export function extractGoogleCoordsFromUrl(url: string): { latitude: number; lon
 
   return null;
 }
+
+// A coordinate a human copied verbatim from Google Maps' own "What's here?"
+// (desktop right-click) / long-press-and-copy (mobile) feature — the exact
+// fallback for links that carry no coordinate at all (confirmed live: some
+// real share links resolve to a page with only an opaque place ID, nothing
+// extractGoogleCoordsFromUrl above can find). Whole-string match only (never
+// a substring inside a URL, so this can never misfire against a real link)
+// and range-validated, so a garbage paste is rejected rather than silently
+// producing an out-of-range "coordinate". Tagged 'user_pin', not 'google' —
+// this is a human manually providing an exact point, the same trust tier as
+// a map pin, not a claim about which provider it came from.
+export function extractLatLngFromText(text: string): { latitude: number; longitude: number; source: 'user_pin' } | null {
+  const match = text.trim().match(/^(-?\d{1,3}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!match) return null;
+
+  const latitude = parseFloat(match[1]);
+  const longitude = parseFloat(match[2]);
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+
+  return { latitude, longitude, source: 'user_pin' };
+}
+
+// When a place URL carries no coordinate at all (the CID-only case above),
+// its /maps/place/<segment>/ path is still present and still carries the
+// business name (and usually its full address) — confirmed against the real
+// captured Nallurahalli URL. Used to pre-fill the listing name/address
+// instead of leaving the user to retype it, even when no coordinate could
+// be extracted at all.
+export function extractPlaceNameFromUrl(url: string): { name: string; address: string | null } | null {
+  const match = url.match(/\/maps\/place\/([^/?#]+)/);
+  if (!match) return null;
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(match[1].replace(/\+/g, ' '));
+  } catch {
+    decoded = match[1].replace(/\+/g, ' ');
+  }
+  decoded = decoded.trim();
+  if (!decoded) return null;
+
+  // A bare coordinate as the "place" segment (a raw dropped-pin share) is
+  // not a business name — nothing useful to pre-fill, and
+  // extractGoogleCoordsFromUrl above would already have found this anyway.
+  if (/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(decoded)) return null;
+
+  const commaIndex = decoded.indexOf(',');
+  if (commaIndex === -1) return { name: decoded, address: null };
+  return { name: decoded.slice(0, commaIndex).trim(), address: decoded.slice(commaIndex + 1).trim() || null };
+}

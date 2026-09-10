@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase, ensureAnonymousSession } from '../lib/supabase';
 import { createListing } from '../lib/listings';
-import { parseGoogleMapsUrl } from '../lib/googleMapsLink';
+import { extractLatLngFromText } from '../lib/extractGoogleCoords';
 import { checkFoodRelevance } from '../lib/contentModeration';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { validateDishDrafts, type DishDraft } from '../lib/dishes';
@@ -67,6 +67,22 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   const [locationPlaceId, setLocationPlaceId] = useState<string | undefined>(undefined);
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
+  // Whether the "how do I get coordinates" popover is open — same pattern
+  // as ListingDetailModal's report popover (a wrap ref + outside-click
+  // effect below), not a new interaction model.
+  const [showCoordsHelp, setShowCoordsHelp] = useState(false);
+  // Whether the popover has room to open downward from the trigger, or
+  // needs to flip upward instead — this modal's body scrolls and the
+  // trigger sits fairly far down the form, so a fixed "always opens below"
+  // popover could run past the visible viewport (observed: it covered the
+  // Post listing button). Measured against the real viewport each time the
+  // popover opens, not assumed from the modal's own layout.
+  const [coordsHelpPlacement, setCoordsHelpPlacement] = useState<'top' | 'bottom'>('bottom');
+  const coordsHelpWrapRef = useRef<HTMLDivElement>(null);
+  // Generous estimate of the popover's own rendered height (three short
+  // lines + padding) — enough to decide the flip without a two-pass
+  // render-then-measure dance for a fixed, small piece of content.
+  const COORDS_HELP_POPOVER_HEIGHT = 190;
   // Resolved from `coords` via reverse geocoding — a human-readable
   // descriptor ("100 Feet Road, Indiranagar") shown to the user for
   // confidence and submitted alongside the exact lat/lon, which stays the
@@ -86,7 +102,6 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   const locationPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const [mapsLink, setMapsLink] = useState('');
-  const [parsingLink, setParsingLink] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +163,18 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     };
   }, [coords]);
 
+  // Closes the coordinates-help popover on an outside tap — identical
+  // pattern to ListingDetailModal's report popover.
+  useEffect(() => {
+    if (!showCoordsHelp) return;
+    function handlePointerDown(e: MouseEvent) {
+      if (coordsHelpWrapRef.current?.contains(e.target as Node)) return;
+      setShowCoordsHelp(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [showCoordsHelp]);
+
   // Hands the GPS fix off to the same full-screen map confirmation "Pick on
   // map" uses, instead of applying it straight to `coords` — GPS can be off
   // (indoors, weak signal), so the user gets to see the point on the map
@@ -178,14 +205,18 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     );
   }
 
-  async function useMapsLink() {
+  // Deliberately coordinates-only — no URL resolution, no short-link
+  // follow, no Places API, no OLA fallback, no guessing of any kind. The
+  // user gets the exact coordinate straight from Google Maps' own
+  // "What's here?" (desktop right-click) / long-press-and-copy (mobile)
+  // feature and pastes it verbatim; extractLatLngFromText is a synchronous,
+  // whole-string, range-validated match, so this never touches the network.
+  function usePastedCoordinates() {
     if (!mapsLink.trim()) return;
-    setParsingLink(true);
     setError(null);
-    const parsed = await parseGoogleMapsUrl(mapsLink);
-    setParsingLink(false);
+    const parsed = extractLatLngFromText(mapsLink);
     if (!parsed) {
-      setError('Could not read that link — try pasting the full Google Maps link, or use another option.');
+      setError('Could not read those coordinates — paste them exactly as Google Maps shows them, e.g. 12.9723, 77.7345.');
       return;
     }
     setCoords({ lat: parsed.latitude, lon: parsed.longitude });
@@ -433,17 +464,69 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
           ) : null}
 
           <div className="location-tabs">
-            <button className={`tab-button ${locationMode === 'current' ? 'active' : ''}`} onClick={useCurrentLocation} disabled={locating}>
+            {/* No `active` state here — `locationMode` defaults to 'current'
+                and is also reset to it after "Pick on map" resolves (see the
+                pickedLocation effect above), so this button used to render
+                as permanently "selected" (solid pink fill) from the moment
+                the modal opened, even before any location existed, and
+                stayed that way after using Pick on Map instead. The Pinned
+                banner above already shows whether/how a location is set —
+                these three don't need a second, misleading indicator. */}
+            <button className="tab-button" onClick={useCurrentLocation} disabled={locating}>
               {locating ? 'Locating…' : 'Use current location'}
             </button>
             <button className="tab-button" onClick={() => onPickOnMap(coords, 'manual')}>Pick on map</button>
-            <button className={`tab-button ${locationMode === 'link' ? 'active' : ''}`} onClick={() => setLocationMode('link')}>Paste link</button>
+            {/* This is the one tab that legitimately toggles visible
+                content (the paste-coordinates input row right below), so it
+                keeps an `active` state — just a subtle one, not a solid
+                fill, since "this section is expanded" isn't the same thing
+                as "this is the confirmed location source". */}
+            <div className="location-tab-with-info" ref={coordsHelpWrapRef}>
+              <button className={`tab-button ${locationMode === 'link' ? 'active' : ''}`} onClick={() => setLocationMode('link')}>Paste coordinates from Google Maps</button>
+              <button
+                type="button"
+                className="location-info-button"
+                onClick={() => {
+                  // Decide top-vs-bottom against the real viewport, not
+                  // just toggle blind — measured fresh on every open since
+                  // the modal's own scroll position can change between
+                  // opens.
+                  if (!showCoordsHelp && coordsHelpWrapRef.current) {
+                    const rect = coordsHelpWrapRef.current.getBoundingClientRect();
+                    const spaceBelow = window.innerHeight - rect.bottom;
+                    const spaceAbove = rect.top;
+                    setCoordsHelpPlacement(
+                      spaceBelow < COORDS_HELP_POPOVER_HEIGHT && spaceAbove > spaceBelow ? 'top' : 'bottom'
+                    );
+                  }
+                  setShowCoordsHelp((v) => !v);
+                }}
+                aria-label="How to get coordinates from Google Maps"
+                title="How to get coordinates from Google Maps"
+              >
+                ⓘ
+              </button>
+              {showCoordsHelp ? (
+                <div className={`location-info-popover ${coordsHelpPlacement === 'top' ? 'location-info-popover-top' : ''}`}>
+                  <p className="location-info-line">
+                    <strong>Desktop:</strong> right-click the exact spot on Google Maps, then click the
+                    coordinates shown in the menu to copy them.
+                  </p>
+                  <p className="location-info-line">
+                    <strong>Mobile:</strong> long-press the exact spot — the coordinates appear at the top
+                    or bottom of the screen depending on your device. Copy them, then come back here and
+                    paste them below (they won't fill in automatically).
+                  </p>
+                  <p className="location-info-example">Example: 12.9723, 77.7345</p>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {locationMode === 'link' ? (
             <div className="link-row">
-              <input className="text-input" value={mapsLink} onChange={(e) => setMapsLink(e.target.value)} placeholder="https://maps.app.goo.gl/..." />
-              <button className="secondary-button" onClick={useMapsLink} disabled={parsingLink}>{parsingLink ? '…' : 'Use'}</button>
+              <input className="text-input" value={mapsLink} onChange={(e) => setMapsLink(e.target.value)} placeholder="e.g. 12.9723, 77.7345" />
+              <button className="secondary-button" onClick={usePastedCoordinates}>Use</button>
             </div>
           ) : null}
 

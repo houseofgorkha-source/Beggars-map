@@ -1536,6 +1536,14 @@ body {
   position: sticky;
   top: 0;
   background: #fff;
+  /* position: sticky alone doesn't guarantee paint order — with both this
+     and .modal-body at the default z-index: auto, .modal-body (later in
+     the DOM) paints OVER this header the instant its scrolled content
+     overlaps it, which is exactly the "dish rows scrolling over the
+     header" bug. An explicit z-index gives this its own stacking context
+     above later siblings, so it stays visually on top regardless of
+     scroll position. */
+  z-index: 1;
 }
 
 .modal-header h2 {
@@ -1678,13 +1686,26 @@ body {
   font-style: italic;
 }
 
+/* Stacked full-width rows instead of wrapping pills — the three labels are
+   too different in length ("Pick on map" vs "Paste coordinates from Google
+   Maps") for a pill row to wrap cleanly; it previously left one pill
+   orphaned alone on its own line. The `.location-tabs .tab-button`
+   overrides below carry the actual look (rectangular, 10px radius,
+   matching .primary-button/.secondary-button/.submit-button elsewhere in
+   this modal); this outer rule just switches the row to a column. */
 .location-tabs {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
+/* .tab-button is shared with LegalModal's true side-by-side tab switcher
+   and ReviewOverlay's own "Pick on map" button — this base rule (and
+   .active below) must stay generic enough for both of those. Add Listing's
+   own location-picker look lives entirely in the `.location-tabs
+   .tab-button` overrides further down, scoped so nothing here leaks into
+   those other two call sites. */
 .tab-button {
   border: 1px solid #ddd;
   background: #fff;
@@ -1698,6 +1719,126 @@ body {
   background: #ec4899;
   color: #fff;
   border-color: #ec4899;
+}
+
+.location-tabs .tab-button {
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+.location-tabs .tab-button:hover:not(:disabled) {
+  border-color: #ec4899;
+  color: #ec4899;
+}
+
+.location-tabs .tab-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* A soft tint, not a solid fill — this only ever marks "the paste-
+   coordinates row below is currently expanded", which isn't the same claim
+   as "this is the listing's confirmed location" (the separate pink Pinned
+   banner above already makes that claim, for whichever option was actually
+   used). Overrides the shared .tab-button.active solid-fill above, scoped
+   the same way. */
+.location-tabs .tab-button.active {
+  background: var(--pink-accent-soft, #fce9f2);
+  color: #ec4899;
+  border-color: #ec4899;
+}
+
+/* Anchors the ⓘ trigger and its popover to the "Paste coordinates" button
+   — same relative-positioning idiom as .compact-report-wrap elsewhere in
+   this app. Deliberately NOT a flex row: the tab-button below stays at its
+   inherited width: 100% (identical to the other two buttons above it — all
+   three must be the same size), and the info button floats on top of its
+   right edge instead of sharing/stealing row width from it. */
+.location-tab-with-info {
+  position: relative;
+}
+
+/* Extra right padding reserves visual space for the floating ⓘ button so
+   the label text never runs under it; left-aligned (its siblings above
+   stay centered) since a trailing icon reads naturally with left-aligned
+   text, the same way a settings-row icon would. */
+.location-tab-with-info .tab-button {
+  padding-right: 38px;
+  text-align: left;
+}
+
+.location-info-button {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: 1px solid #ddd;
+  border-radius: 50%;
+  background: #fff;
+  color: #888;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.location-info-button:hover {
+  border-color: #ec4899;
+  color: #ec4899;
+}
+
+/* Compact, responsive card — capped width so it never approaches a phone's
+   full viewport, and right-anchored to the wrap (which spans the same
+   width as the tab-button row above it) so it can never overflow the
+   modal's own right edge regardless of screen size. Opens downward by
+   default; AddListingModal measures available viewport space on each open
+   and adds .location-info-popover-top when there isn't room below — this
+   modal's body scrolls and the trigger sits well down the form, so a
+   fixed "always below" popover could run past the visible viewport
+   (observed: it covered the Post listing button entirely). */
+.location-info-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 8;
+  width: max-content;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  padding: 10px 12px;
+}
+
+.location-info-popover-top {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.location-info-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #333;
+}
+
+.location-info-example {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid #eee;
+  font-size: 12px;
+  color: #888;
 }
 
 .result-row {
@@ -2049,9 +2190,14 @@ body {
     padding: 11px 6px 11px 12px;
     font-size: 14px;
   }
+  /* font-size floored at 16px (not the previous 14px) — iOS Safari
+     auto-zooms the whole page when a focused text input's font-size is
+     under 16px, which read as "the page/map zooms when I tap search" on a
+     real iPhone. 16px is the documented threshold; padding is unchanged so
+     this stays as close to the original sizing as the fix allows. */
   .search-input-inline {
     padding: 11px 6px;
-    font-size: 14px;
+    font-size: 16px;
   }
   .search-icon-button {
     padding: 0 12px;
@@ -2332,9 +2478,14 @@ body {
     padding: 7px 4px 7px 10px;
     font-size: 12px;
   }
+  /* font-size floored at 16px, same iOS-Safari-auto-zoom reasoning as the
+     shared phone rule above — this landscape-only pass had dropped it
+     further still, to 12px, which is even further under the threshold.
+     Padding unchanged, so the layout footprint grows only as much as the
+     larger text itself requires. */
   .search-input-inline {
     padding: 7px 4px;
-    font-size: 12px;
+    font-size: 16px;
   }
   .search-icon-button {
     padding: 0 10px;
