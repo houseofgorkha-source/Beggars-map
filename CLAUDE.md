@@ -230,6 +230,39 @@ No device/emulator was available in this environment for a real on-screen tap-th
 - **Not committed, sitting in the working tree**: migration `0025` + its `tests/rls.test.mjs`/`tests/locationProvenance.test.mjs` coverage; `web/src/lib/googleMapsLink.ts`'s rewritten-but-orphaned `parseGoogleMapsUrl`; the `resolve-maps-link` `g.co` allowlist addition. See "Parked" below for the full, current list — this bullet is deliberately not repeated there in full.
 - **Full verification for every committed piece**: `npm test`, `tsc --noEmit`, and `npm run build` all clean at each step — see each section's own "Verification" note above for exact counts.
 
+# Add Listing: Photo Copy/Paste + Contextual Location Help (2026-09-11)
+
+A follow-up UX pass on `AddListingModal.tsx` (and, for one piece, the full-screen map's own picking-location dialog in `App.tsx`), driven by direct user feedback across several rounds after the initial coordinate-help ⓘ popover shipped in the "Add Listing location UX polish" section above.
+
+## Paste-coordinates button — real centering, not just visual
+
+The ⓘ trigger beside "Paste coordinates from Google Maps" used to reserve its own `padding-right` and force `text-align: left` on that one button, so its label text didn't actually center the same way its two siblings ("Use current location"/"Pick on map") did — all three needed to be pixel-identical. Fixed by removing that override entirely: the button now inherits `.location-tabs .tab-button`'s styling completely unstyled, and the ⓘ button is a pure `position: absolute` overlay with zero reserved layout space, so its presence can never shift where the label text centers.
+
+The ⓘ button itself was also too subtle to read as an information affordance — a faint white circle with a light gray border and gray glyph, indistinguishable from the white button it sat on except on hover. Switched to a solid `var(--pink-accent)` fill with white text and a small drop shadow (matching this app's `.primary-button` accent language), so it reads as "tap me for information" at a glance instead of only on hover.
+
+## Photo copy/paste — a real Discovery-Workbench-style paste box, not an invisible one
+
+Went through two iterations here, worth recording since the first one looked right on paper but didn't actually work as asked:
+
+1. **First attempt**: a document-level native `paste` event listener, active for the modal's whole lifetime, so Ctrl+V anywhere in the form would add a photo with zero new UI. This technically worked for the keyboard shortcut, but delivered **no right-click → Paste option and no mobile long-press → Paste option** — browsers only offer those two in their native context/selection menus over an element they recognize as an actual text-editing surface (a real input/textarea, or `contentEditable`), and a plain focusable `<div>` (even with `tabIndex`) doesn't qualify, no matter how it's styled.
+2. **Fixed version**: the paste target is now a small `contentEditable` box (`.photo-paste-box`, 56×56px to match the existing `.photo-thumb` size) placed directly beside any already-added photo thumbnails in `.photo-thumbs`, with "+ Add photos" moved to its own line below that row. Because it's genuinely `contentEditable`, right-click → Paste (desktop) and the long-press selection menu → Paste (mobile) both now appear over it, exactly mirroring the Discovery Workbench's own `discovery-photo-paste-box` pattern (`CandidateDetail.tsx`) — the explicit reference point for this feature. `handlePhotoPaste` calls `preventDefault()` so the browser's own contentEditable behavior (inserting the image as a real `<img>` node, or raw text) never actually lands inside the box — its real DOM content must always stay empty; the "Paste" hint text is a pure CSS `:empty::before`, and a small `onKeyDown` guard blocks ordinary typing (Ctrl+V/Cmd+V still passes through) so a stray click-and-type can't leave real text sitting in it.
+
+Both the file-picker's `onChange` and the paste handler now funnel through one shared `addPhotoFiles()` — same `MAX_PHOTOS` limit, same preview generation, same everything else, regardless of how the File arrived. No new client-side type/size validation was added (matching the pre-existing file-picker path, which also has none — the storage bucket's own `0018` restrictions remain the actual enforcement layer).
+
+## "Can't find the restaurant?" — moved to where it can actually help
+
+This was first added as a static link inside `AddListingModal.tsx`'s own location section. That placement didn't survive contact with the real flow: the modal is `hidden` (not unmounted, but invisible) for the entire duration of "Pick on map," so a note living inside it could never be seen by someone actually stuck searching on the full-screen map — exactly the moment (the Vigneshwara Tiffens case) this is meant to help with.
+
+**Moved to `App.tsx`'s existing `picking-dialog`** — the one-time acknowledgment card that already appears the instant "Pick on map" is clicked ("Tap the map, tap a restaurant shown on it, or search a location/landmark..."). A second paragraph was added underneath it, visually separated by a top divider (`.picking-dialog-fallback`, same convention as the coordinate-help popover's own `.location-info-example` divider):
+
+> Can't find the restaurant? Search for a nearby landmark or area, then directly pinpoint the restaurant on the map and click "Add this place". You can also copy the coordinates from Google Maps and paste them in the Add Listing form's "Paste coordinates from Google Maps" option.
+
+Deliberately reworded from an earlier draft that said "...and paste them here" — that phrasing only made sense when this lived inside the modal itself; now that it's shown on a different screen (the modal is hidden throughout), it explicitly points back to the Add Listing form and names the exact button by its real label. Scoped to the `pickingSource !== 'current-location'` branch only (the GPS-confirmation dialog isn't about searching for a place, so the fallback doesn't apply there). Deliberately **not** tied to any search-results state (no "zero results" detection) — it's static guidance shown once per pick session, so it can never interfere with or depend on the actual search/map pipeline.
+
+## Verification
+
+`cd web && npx tsc --noEmit` and `npm run build` clean after every change in this pass. Full `npm test`: 403 passing consistently across every run; failure count fluctuated between runs (44 / 28 / 16 depending on which of `adminAuth.test.mjs`/`discoveryWorkbench.test.mjs` happened to self-skip due to local Docker stack reachability at that moment) but the *pass* count never moved and every failure was confirmed by name to be the same pre-existing `adminAuth`/`discoveryWorkbench`/`workbenchSync` local-state-dependent set — zero regressions from anything in this pass. No physical device/emulator was available to hand-test the actual right-click/long-press context menus; the `contentEditable` mechanism itself is standard, well-documented browser behavior, not something invented for this app, but the real on-device menus were not visually confirmed.
+
 # Current Project State (as of 2026-09-10)
 
 Concise, factual snapshot of what is actually true right now — kept separate from the roadmap above, which is durable/forward-looking. Full narrative and historical detail for everything below lives in AGENTS.md; this section exists so a fresh session can get oriented without reading that much longer log first. Verify against AGENTS.md and production directly before relying on this for anything consequential — it decays the same way any status snapshot does.

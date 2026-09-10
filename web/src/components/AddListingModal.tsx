@@ -175,6 +175,17 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, [showCoordsHelp]);
 
+  // Measures real available viewport space against the coordinate-help
+  // trigger's own wrap so it can decide top-vs-bottom fresh on every open,
+  // since the modal's scroll position can change between opens.
+  function measurePopoverPlacement(el: HTMLElement | null, estimatedHeight: number): 'top' | 'bottom' {
+    if (!el) return 'bottom';
+    const rect = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    return spaceBelow < estimatedHeight && spaceAbove > spaceBelow ? 'top' : 'bottom';
+  }
+
   // Hands the GPS fix off to the same full-screen map confirmation "Pick on
   // map" uses, instead of applying it straight to `coords` — GPS can be off
   // (indoors, weak signal), so the user gets to see the point on the map
@@ -236,15 +247,55 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     setError(null);
   }
 
+  // Shared by the file-picker's onChange and the clipboard-paste handler
+  // below — one place that respects MAX_PHOTOS and builds previews,
+  // regardless of how a File/Blob actually arrived.
+  function addPhotoFiles(files: File[]) {
+    if (files.length === 0) return;
+    const room = MAX_PHOTOS - photoFiles.length;
+    if (room <= 0) return;
+    const accepted = files.slice(0, room);
+    setPhotoFiles((prev) => [...prev, ...accepted]);
+    setPhotoPreviews((prev) => [...prev, ...accepted.map((f) => URL.createObjectURL(f))]);
+  }
+
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
     e.target.value = ''; // allow picking the same file again later
-    if (picked.length === 0) return;
+    addPhotoFiles(picked);
+  }
 
-    const room = MAX_PHOTOS - photoFiles.length;
-    const accepted = picked.slice(0, room);
-    setPhotoFiles((prev) => [...prev, ...accepted]);
-    setPhotoPreviews((prev) => [...prev, ...accepted.map((f) => URL.createObjectURL(f))]);
+  // Ordinary copy/paste for photos — same underlying idea as the Discovery
+  // Workbench's own photo paste box (CandidateDetail.tsx's handlePaste):
+  // check clipboardData.items for an image, hand the File to the normal
+  // add-photo path.
+  //
+  // The box itself is `contentEditable`, not just a focusable plain <div> —
+  // that's load-bearing, not decorative. A plain div (even with tabIndex)
+  // can still receive a paste fired by the Ctrl+V keyboard shortcut, but
+  // browsers only offer "Paste" in the right-click context menu (desktop)
+  // or the long-press selection menu (mobile) over an element they
+  // recognize as an actual text-editing surface — a real input/textarea,
+  // or contentEditable. Without this, there was no right-click/long-press
+  // path at all, only the keyboard shortcut. preventDefault stops the
+  // browser's own contentEditable behavior (inserting the image as a real
+  // <img> node, or raw text, into the box itself) — this box's own content
+  // must always stay empty; the placeholder text is a pure CSS
+  // `:empty::before`, never real DOM content.
+  function handlePhotoPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith('image/'));
+    const file = item?.getAsFile();
+    if (file) addPhotoFiles([file]);
+    e.currentTarget.textContent = '';
+  }
+
+  // Blocks ordinary typing into the paste box — it's contentEditable only
+  // so the browser offers a native Paste option (see handlePhotoPaste
+  // above), never so a stray click-and-type could leave real text sitting
+  // in it. Ctrl+V/Cmd+V itself must still go through untouched.
+  function handlePhotoBoxKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!(e.ctrlKey || e.metaKey) && e.key !== 'Tab') e.preventDefault();
   }
 
   function removePhoto(index: number) {
@@ -434,11 +485,31 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
               </div>
             ))}
             {photoFiles.length < MAX_PHOTOS ? (
-              <button type="button" className="text-button-inline photo-add-link" onClick={() => fileInputRef.current?.click()}>
-                + Add photo{photoFiles.length > 0 ? '' : 's'}
-              </button>
+              // contentEditable (not just a focusable plain div) is what
+              // makes the browser offer a real "Paste" item on right-click
+              // (desktop) or in the long-press selection menu (mobile) —
+              // see handlePhotoPaste's own comment for why. Sits directly
+              // beside the existing thumbnails so an already-added photo
+              // and this empty frame read as one row of "slots", with
+              // "+ Add photos" moved to its own line below.
+              <div
+                className="photo-paste-box"
+                contentEditable
+                suppressContentEditableWarning
+                tabIndex={0}
+                role="textbox"
+                aria-label="Paste a photo"
+                onPaste={handlePhotoPaste}
+                onKeyDown={handlePhotoBoxKeyDown}
+                title="Right-click or long-press here, then Paste"
+              />
             ) : null}
           </div>
+          {photoFiles.length < MAX_PHOTOS ? (
+            <button type="button" className="text-button-inline photo-add-link" onClick={() => fileInputRef.current?.click()}>
+              + Add photo{photoFiles.length > 0 ? '' : 's'}
+            </button>
+          ) : null}
           <input
             ref={fileInputRef}
             type="file"
@@ -487,17 +558,8 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
                 type="button"
                 className="location-info-button"
                 onClick={() => {
-                  // Decide top-vs-bottom against the real viewport, not
-                  // just toggle blind — measured fresh on every open since
-                  // the modal's own scroll position can change between
-                  // opens.
-                  if (!showCoordsHelp && coordsHelpWrapRef.current) {
-                    const rect = coordsHelpWrapRef.current.getBoundingClientRect();
-                    const spaceBelow = window.innerHeight - rect.bottom;
-                    const spaceAbove = rect.top;
-                    setCoordsHelpPlacement(
-                      spaceBelow < COORDS_HELP_POPOVER_HEIGHT && spaceAbove > spaceBelow ? 'top' : 'bottom'
-                    );
+                  if (!showCoordsHelp) {
+                    setCoordsHelpPlacement(measurePopoverPlacement(coordsHelpWrapRef.current, COORDS_HELP_POPOVER_HEIGHT));
                   }
                   setShowCoordsHelp((v) => !v);
                 }}
@@ -522,6 +584,13 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
               ) : null}
             </div>
           </div>
+
+          {/* "Can't find the restaurant?" fallback guidance now lives on the
+              full-screen map/search flow itself (App.tsx's picking-dialog,
+              shown right after "Pick on map" is clicked) — not here, since
+              this modal is hidden for the entire duration of that flow and
+              a note living behind a hidden screen couldn't help anyone
+              actually searching. See App.tsx for the current copy. */}
 
           {locationMode === 'link' ? (
             <div className="link-row">

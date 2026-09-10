@@ -1432,7 +1432,22 @@ export default function App() {
                     <p className="picking-dialog-body">Tap the map to adjust it, or confirm below.</p>
                   </>
                 ) : (
-                  <p className="picking-dialog-title">Tap the map, tap a restaurant shown on it, or search a location/landmark, to choose this listing's location.</p>
+                  <>
+                    <p className="picking-dialog-title">Tap the map, tap a restaurant shown on it, or search a location/landmark, to choose this listing's location.</p>
+                    {/* Fallback guidance for exactly the Vigneshwara Tiffens
+                        case (a real search that never surfaces the right
+                        result) — shown right here, in the one moment this
+                        screen already has the user's attention, rather than
+                        inside AddListingModal (hidden for this flow's whole
+                        duration, so a note living there could never actually
+                        help someone stuck searching). */}
+                    <p className="picking-dialog-body picking-dialog-fallback">
+                      Can't find the restaurant? Search for a nearby landmark or area, then directly pinpoint
+                      the restaurant on the map and click "Add this place". You can also copy the coordinates
+                      from Google Maps and paste them in the Add Listing form's "Paste coordinates from Google
+                      Maps" option.
+                    </p>
+                  </>
                 )}
                 <button className="primary-button" onClick={() => setPickingDialogDismissed(true)}>OK</button>
               </div>

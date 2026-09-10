@@ -517,6 +517,16 @@ body {
   margin: 0 0 10px;
 }
 
+/* Visually separates the "can't find it" fallback from the primary
+   instruction above it, same divider convention as .location-info-example
+   in AddListingModal's own coordinate-help popover. */
+.picking-dialog-fallback {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+  font-size: 12px;
+}
+
 .picking-dialog .primary-button {
   margin-top: 8px;
   padding: 8px 24px;
@@ -1633,8 +1643,48 @@ body {
   justify-content: center;
 }
 
+/* Now a block-level line below .photo-thumbs (moved there so an added
+   photo and the empty paste frame can sit side by side above it, in
+   .photo-thumbs itself) — needs its own top spacing since it's no longer
+   inline in that flex row. */
 .photo-add-link {
+  display: block;
+  margin-top: 8px;
   font-size: 13px;
+}
+
+/* Same dashed-box copy/paste affordance as the Discovery Workbench's own
+   .discovery-photo-paste-box (src/discovery/discovery.css), scaled down to
+   match this row's compact 56px .photo-thumb size instead of Workbench's
+   110px — this modal's photo row is a single compact line, not a grid, so
+   the box needs to sit flush alongside the thumbnails rather than
+   dominating the row. contentEditable (see the JSX/handlePhotoPaste's own
+   comments for why), so the placeholder text below is a pure CSS
+   `:empty::before` — the box's real content must always stay empty. */
+.photo-paste-box {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11px;
+  color: #999;
+  border: 2px dashed #ddd;
+  border-radius: 8px;
+  cursor: text;
+  overflow: hidden;
+}
+
+.photo-paste-box:empty::before {
+  content: 'Paste';
+}
+
+.photo-paste-box:focus {
+  outline: none;
+  border-color: var(--pink-accent);
+  color: var(--pink-accent);
 }
 
 .pinned-banner {
@@ -1763,37 +1813,40 @@ body {
   position: relative;
 }
 
-/* Extra right padding reserves visual space for the floating ⓘ button so
-   the label text never runs under it; left-aligned (its siblings above
-   stay centered) since a trailing icon reads naturally with left-aligned
-   text, the same way a settings-row icon would. */
-.location-tab-with-info .tab-button {
-  padding-right: 38px;
-  text-align: left;
-}
+/* Deliberately NO padding/text-align override here any more — this button
+   must match its two siblings ("Use current location"/"Pick on map")
+   exactly (same padding, same centered text), so it inherits
+   .location-tabs .tab-button completely unstyled. The ⓘ button below floats
+   on top of the right edge as a pure overlay with no reserved layout space,
+   so its presence can never shift where the label text centers. */
 
+/* Solid pink fill, not an outline — this needs to read at a glance as "tap
+   me for information," not blend into the white button it floats on top
+   of. Same accent color/weight as this app's other primary affordances
+   (.primary-button), just circular and small. */
 .location-info-button {
   position: absolute;
   top: 50%;
   right: 10px;
   transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
-  border: 1px solid #ddd;
+  width: 24px;
+  height: 24px;
+  border: none;
   border-radius: 50%;
-  background: #fff;
-  color: #888;
-  font-size: 13px;
+  background: var(--pink-accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 1px 5px rgba(236, 72, 153, 0.5);
 }
 
 .location-info-button:hover {
-  border-color: #ec4899;
-  color: #ec4899;
+  background: #c23e79;
 }
 
 /* Compact, responsive card — capped width so it never approaches a phone's
