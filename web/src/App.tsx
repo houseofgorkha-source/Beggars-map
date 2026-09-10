@@ -1361,6 +1361,7 @@ export default function App() {
                 <input
                   ref={searchInputRef}
                   className="search-input-inline"
+                  enterKeyHint="search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onFocus={() => setSearchResultsOpen(true)}
@@ -1374,6 +1375,15 @@ export default function App() {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       executeSearch(query);
+                      // Mobile-web fix (2026-09-11): dismiss the on-screen
+                      // keyboard on submit, same as a native search field —
+                      // previously nothing ever blurred this input, so the
+                      // keyboard stayed open after Enter, covering roughly
+                      // half the (already-focused) map/results below.
+                      // Fires immediately, independent of executeSearch's
+                      // own async resolution — dismissing the keyboard
+                      // shouldn't wait on the network.
+                      e.currentTarget.blur();
                     }
                     // Escape always fully backs out of the search (not just
                     // closing the suggestion dropdown) — the one keyboard

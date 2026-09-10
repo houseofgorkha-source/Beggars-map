@@ -5,6 +5,14 @@ import type { Listing } from '../types';
 
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 }; // Bengaluru
 
+// Mirrors App.tsx's own MOBILE_PORTRAIT_QUERY constant exactly (not
+// exported from there, so duplicated here rather than adding a new prop —
+// this is the one existing breakpoint threshold used everywhere else in the
+// app, not a new one invented for this fix). Used only by the searchFocus
+// fitBounds effect below, at the moment a search executes — cheap, and
+// avoids threading a new prop through App.tsx just for this.
+const MOBILE_PORTRAIT_QUERY = '(max-width: 720px) and (orientation: portrait)';
+
 type Props = {
   listings: Listing[];
   onSelectListing: (id: string) => void;
@@ -388,12 +396,32 @@ export default function MapView({
   // bottom/left stay modest since nothing floats there. Entirely separate
   // from the popup/pin-selection effects above — this never touches
   // selectedMarkerElRef or popupPosition.
+  //
+  // Mobile-web bug (2026-09-11): that same desktop-tuned padding was being
+  // applied unconditionally on every breakpoint. Mobile portrait has no
+  // right-side list panel at all (it's a bottom sheet — see App.tsx's
+  // MOBILE_PORTRAIT_QUERY/sheetState), so `right: 380` alone reserves more
+  // width than a real phone viewport even has (~360-430px), leaving
+  // fitBounds zero/negative usable width to fit anything into — confirmed
+  // live: the exact `right:380` bytes were present in production's own
+  // bundle. Google Maps degrades to an extremely low (country-level) zoom
+  // when asked to satisfy an impossible padding constraint, which is
+  // exactly what "search zooms out to India" looked like. Fixed by reading
+  // the same breakpoint every other mobile-specific layout decision in this
+  // app already uses and switching to compact, non-degenerate padding there
+  // — no side panel to clear, just enough top/bottom room for the search
+  // bar and the collapsed sheet's peek strip. Desktop/tablet/landscape
+  // padding is completely unchanged.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !searchFocus || mapLoading || searchFocus.points.length === 0) return;
     const bounds = new google.maps.LatLngBounds();
     searchFocus.points.forEach((p) => bounds.extend(p));
-    map.fitBounds(bounds, { top: 100, right: 380, bottom: 60, left: 60 });
+    const isMobilePortrait = window.matchMedia(MOBILE_PORTRAIT_QUERY).matches;
+    const padding = isMobilePortrait
+      ? { top: 90, right: 40, bottom: 140, left: 40 }
+      : { top: 100, right: 380, bottom: 60, left: 60 };
+    map.fitBounds(bounds, padding);
     google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
       const zoom = map.getZoom();
       if (zoom !== undefined && zoom > 15) map.setZoom(15);
