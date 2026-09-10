@@ -65,6 +65,11 @@ export type CreateListingInput = {
   longitude: number;
   location_label: string | null;
   location_source: string;
+  // Stage 2A provenance (0015) — set only when a POI tap captured a real
+  // Google place_id. Optional: omitted entirely (not even an empty object)
+  // whenever no provider identity was captured, so a plain pin-drop or
+  // paste-link submission doesn't fabricate one.
+  provider_place_ids?: Record<string, string>;
 };
 
 export async function createListing(input: CreateListingInput): Promise<{ id: string } | { error: string }> {

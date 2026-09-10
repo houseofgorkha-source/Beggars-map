@@ -30,6 +30,7 @@ import { extractGoogleCoordsFromUrl as extractMobile } from '../src/lib/extractG
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_PATH = join(__dirname, '..', 'supabase', 'migrations', '0015_location_provenance.sql');
+const RESOLVE_MAPS_LINK_PATH = join(__dirname, '..', 'supabase', 'functions', 'resolve-maps-link', 'index.ts');
 
 // ---------------------------------------------------------------------------
 // Static schema check: parse the actual committed migration file rather than
@@ -283,5 +284,153 @@ for (const [label, extractGoogleCoordsFromUrl] of [
     test('a URL with no embedded coordinate returns null, never a guess', () => {
       assert.equal(extractGoogleCoordsFromUrl('https://www.google.com/maps/place/CTR'), null);
     });
+
+    // -----------------------------------------------------------------
+    // Priority order — the "Vigneshwara Tiffens" production bug.
+    //
+    // A named-place URL can carry more than one coordinate pattern at once,
+    // and they are not equally trustworthy: `@lat,lng,zoom` is only ever the
+    // map's viewport center on load, while `!3d!4d` (and `?q=`) are tied to
+    // the specific place/coordinate actually being shared. Checking `@`
+    // first used to silently return the viewport point as the listing's
+    // location whenever both were present — confirmed live against
+    // maps.app.goo.gl/ek3KnmaGp6iHB5U79's real resolved URL below, where the
+    // viewport (@12.9344627,77.547142, a Banashankari-area point ~20km
+    // away) and the actual restaurant's precise coordinate (Whitefield)
+    // both appear in the same string.
+    // -----------------------------------------------------------------
+    describe('coordinate-pattern priority', () => {
+      test('!3d!4d wins over @ when a URL carries both (the Vigneshwara Tiffens bug)', () => {
+        const url =
+          'https://www.google.com/maps/place/Vigneshwara+Tiffens/@12.9344627,77.547142,12z/data=!4m7!3m6!1s0x3bae13000e915e79:0x726a2ab1893d5866!8m2!3d12.972322!4d77.7344565!15sChNWaWduZXNod2FyYSBUaWZmaW5z?entry=tts';
+        const result = extractGoogleCoordsFromUrl(url);
+        assert.deepEqual(result, { latitude: 12.972322, longitude: 77.7344565, source: 'google' });
+      });
+
+      test('?q= wins over @ when a URL carries both', () => {
+        const url = 'https://www.google.com/maps/place/Somewhere/@12.9344627,77.547142,12z/data=?q=12.972322,77.7344565';
+        const result = extractGoogleCoordsFromUrl(url);
+        assert.deepEqual(result, { latitude: 12.972322, longitude: 77.7344565, source: 'google' });
+      });
+
+      test('an @-only URL (a raw dropped-pin share, no place-data blob) still resolves via @', () => {
+        // Regression guard for the reorder itself: a URL with nothing more
+        // specific than the viewport must still fall through to it, not
+        // return null.
+        const result = extractGoogleCoordsFromUrl('https://www.google.com/maps/@12.9716,77.5946,15z');
+        assert.deepEqual(result, { latitude: 12.9716, longitude: 77.5946, source: 'google' });
+      });
+
+      test('the CID-only Nallurhalli share link still returns null, never a guess', () => {
+        // The real resolved target of https://maps.app.goo.gl/hYaCqgvbvXLuN75j9?g_st=ac
+        // (captured live) — carries only a Google Place ID (CID), no @, no
+        // ?q=, no !3d!4d anywhere. There is genuinely nothing to extract
+        // without a Places Details lookup, which this fix deliberately does
+        // not add — null is the correct, honest outcome, not a bug.
+        const url =
+          'https://www.google.com/maps/place/Vigneshwara+Tiffens,+Nallurahalli+Main+Rd,+opp.+Carrymart+supermarket,+Nallurhalli,+Whitefield,+Bengaluru,+Karnataka+560066/data=!4m2!3m1!1s0x3bae13000e915e79:0x726a2ab1893d5866!18m1!1e1?utm_source=mstt_1&entry=gps';
+        assert.equal(extractGoogleCoordsFromUrl(url), null);
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // Directions links — a "/maps/dir/" URL's @lat,lng is only the route's
+    // viewport, never the destination. Found during the paste-location
+    // safety audit: silently returning that viewport risked saving a
+    // restaurant at the wrong end of a route with no error shown.
+    // -----------------------------------------------------------------
+    describe('Directions URLs are refused, not guessed', () => {
+      test('a directions URL with only a viewport @ coordinate returns null', () => {
+        const url = 'https://www.google.com/maps/dir/Current+Location/Vigneshwara+Tiffens/@12.95,77.65,12z/data=!4m2!4m1!3e0';
+        assert.equal(extractGoogleCoordsFromUrl(url), null);
+      });
+
+      test('a directions URL whose destination coordinate is embedded as !1d!2d (not !3d!4d) still returns null', () => {
+        // This variant actually carries the real destination coordinate
+        // (77.7344565, 12.972322, via Google's !1d<lng>!2d<lat> directions
+        // encoding) alongside the misleading viewport @ — proof that this
+        // guard refuses the whole URL rather than only avoiding @, since
+        // parsing !1d!2d correctly for every directions variant isn't
+        // reliable enough to trust as a coordinate source.
+        const url =
+          'https://www.google.com/maps/dir//Vigneshwara+Tiffens/@12.95,77.65,12z/data=!4m8!4m7!1m0!1m0!1m5!1m1!1s0x3bae13000e915e79!2m2!1d77.7344565!2d12.972322!3e0';
+        assert.equal(extractGoogleCoordsFromUrl(url), null);
+      });
+
+      test('a directions URL is refused even if it also happens to carry a !3d!4d pair', () => {
+        // Belt-and-suspenders: the /maps/dir/ check runs before any pattern
+        // match, so it can never be a near-miss depending on what else the
+        // URL contains.
+        const url =
+          'https://www.google.com/maps/dir/Origin/Vigneshwara+Tiffens/@12.95,77.65,12z/data=!4m2!3m1!1s0x3bae13000e915e79!3d12.972322!4d77.7344565';
+        assert.equal(extractGoogleCoordsFromUrl(url), null);
+      });
+
+      test('a non-directions URL with the same coordinates is unaffected by the guard', () => {
+        const url = 'https://www.google.com/maps/place/Vigneshwara+Tiffens/data=!3d12.972322!4d77.7344565';
+        assert.deepEqual(extractGoogleCoordsFromUrl(url), { latitude: 12.972322, longitude: 77.7344565, source: 'google' });
+      });
+    });
   });
 }
+
+// ---------------------------------------------------------------------------
+// resolve-maps-link — static check that the OLA location-guess fallback is
+// gone, and that normal redirect resolution is untouched.
+//
+// This Edge Function runs on Deno (Deno.serve, Deno.env.get) and can't be
+// imported under plain Node — same reasoning as the 0015 migration check
+// above, this reads the actual committed source file as text and asserts
+// on its content, so it stays real evidence even without a Deno runtime.
+// ---------------------------------------------------------------------------
+describe('resolve-maps-link (static source check)', () => {
+  const source = readFileSync(RESOLVE_MAPS_LINK_PATH, 'utf8');
+
+  test('no longer imports the shared place-ranking module', () => {
+    // That import existed solely to power the removed guess — its absence
+    // is direct evidence the guessing code path, not just the OLA fetch
+    // call inside it, is gone.
+    assert.equal(source.includes('placeRanking'), false);
+  });
+
+  test('does not fetch api.olamaps.io', () => {
+    assert.equal(source.includes('olamaps.io'), false);
+  });
+
+  test('normal redirect resolution is untouched: still follows the redirect and returns finalUrl', () => {
+    assert.ok(source.includes('fetch(parsed.toString())'), 'expected the redirect-following fetch to still be present');
+    assert.ok(source.includes('finalUrl: resolvedUrl.toString()'), 'expected the function to still return finalUrl');
+  });
+
+  test('the goo.gl / share.google allowlist is untouched', () => {
+    assert.ok(source.includes("parsed.hostname === 'goo.gl'"));
+    assert.ok(source.includes("parsed.hostname === 'share.google'"));
+  });
+
+  test('never returns a latitude/longitude pair (the removed guess shape)', () => {
+    assert.equal(/latitude\s*:\s*match/.test(source), false);
+    assert.equal(/longitude\s*:\s*match/.test(source), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Web and mobile stay behaviourally identical — run the same representative
+// set of URLs through both and assert equal results, rather than relying
+// only on the shared for-loop above running the same test bodies twice.
+// ---------------------------------------------------------------------------
+describe('extractGoogleCoordsFromUrl — web/mobile parity', () => {
+  const urls = [
+    'https://www.google.com/maps/place/Vigneshwara+Tiffens/@12.9344627,77.547142,12z/data=!4m7!3m6!1s0x3bae13000e915e79:0x726a2ab1893d5866!8m2!3d12.972322!4d77.7344565',
+    'https://www.google.com/maps/@12.9716,77.5946,15z',
+    'https://maps.google.com/maps?q=12.9716,77.5946',
+    'https://www.google.com/maps/dir/Current+Location/Vigneshwara+Tiffens/@12.95,77.65,12z/data=!4m2!4m1!3e0',
+    'https://www.google.com/maps/place/Vigneshwara+Tiffens,+Nallurahalli+Main+Rd/data=!4m2!3m1!1s0x3bae13000e915e79:0x726a2ab1893d5866!18m1!1e1',
+    'not a url at all',
+  ];
+
+  for (const url of urls) {
+    test(`web and mobile agree for: ${url.slice(0, 60)}`, () => {
+      assert.deepEqual(extractWeb(url), extractMobile(url));
+    });
+  }
+});

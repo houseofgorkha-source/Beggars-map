@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as Re
 import { supabase } from './lib/supabase';
 import { fetchListings } from './lib/listings';
 import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPlaces';
-import { placeTypeRank, TYPE_RANK_POI } from './lib/placeRanking';
+import { placeTypeRank, TYPE_RANK_POI, filterByBiasDistance } from './lib/placeRanking';
 import { formatRelativeTime } from './lib/relativeTime';
 import { distanceKm } from './lib/distance';
 import { filterByDimension, denormalizeDimensionValue } from './lib/extractDimensions';
@@ -233,7 +233,7 @@ export default function App() {
   // map's pin marker AND the "+ Add this place" button: however the point
   // got pinned, that button adds a listing there. Cleared when a real
   // listing is selected instead, or the search box is cleared.
-  const [searchPin, setSearchPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; placeId?: string } | null>(null);
   // True while the Add Listing modal is hidden and the user is picking a
   // location directly on this full-screen map instead (see
   // startPickingLocation/cancelPickingLocation/confirmAddThisPlace below).
@@ -252,6 +252,11 @@ export default function App() {
     lon: number;
     token: number;
     source: 'manual' | 'current-location';
+    // Set only when the pick was a tap on one of Google's own base-map POI
+    // icons (see MapView's poiSelectable/onMapClick) rather than a plain
+    // pin drop — lets AddListingModal record real location provenance
+    // instead of a generic user_pin.
+    placeId?: string;
   } | null>(null);
   // Same shape as pickedLocation above, but for the "suggest a location
   // correction" flow inside ReviewOverlay (Phase 3) — kept as a genuinely
@@ -534,7 +539,17 @@ export default function App() {
   // results[0] here used to hand back exactly the artifact bestPlaceMatch had
   // just refused, putting the area-match center up to a kilometre off.
   async function resolveAreaMatches(q: string, near: { lat: number; lon: number }) {
-    const results = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
+    const rawResults = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
+    // The same geographic sanity guard that decides the map pin/center also
+    // gates what the suggestion DROPDOWN shows — previously it only filtered
+    // `top`, so the dropdown itself still listed OLA's raw, unfiltered order
+    // (confirmed live: searching "Vigneshwara Tiffens" showed four Hyderabad
+    // entries above the one real Bengaluru match). Beggars Map is
+    // Bengaluru-only today (see the city-context note on
+    // MAX_BIAS_DISTANCE_KM in placeRanking.ts), so a result this far from
+    // the search bias point has no business being offered as a suggestion,
+    // not just being ineligible to win the pin.
+    const results = filterByBiasDistance(rawResults, { latitude: near.lat, longitude: near.lon });
     const top =
       bestPlaceMatch(q, results, { latitude: near.lat, longitude: near.lon }) ??
       results.find((r) => placeTypeRank(r.types) === TYPE_RANK_POI) ??
@@ -1125,9 +1140,9 @@ export default function App() {
   // click outside that flow is a no-op here and Google's own default map
   // interaction (pan handled natively, click otherwise ignored) is all
   // that happens.
-  function handleMapClick(latitude: number, longitude: number) {
+  function handleMapClick(latitude: number, longitude: number, placeId?: string) {
     if (!pickingLocation) return;
-    setSearchPin({ lat: latitude, lng: longitude });
+    setSearchPin({ lat: latitude, lng: longitude, placeId });
   }
 
   // "Pick on map" inside an already-open Add Listing modal hides that modal
@@ -1173,7 +1188,7 @@ export default function App() {
       if (pickingPurpose === 'correction') {
         setCorrectionPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1 }));
       } else {
-        setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1, source: pickingSource }));
+        setPickedLocation((prev) => ({ lat: searchPin.lat, lon: searchPin.lng, token: (prev?.token ?? 0) + 1, source: pickingSource, placeId: searchPin.placeId }));
       }
       setPickingLocation(false);
       setPickingDialogDismissed(false);
@@ -1313,6 +1328,7 @@ export default function App() {
               onSelectListing={pickingLocation ? () => {} : selectListingFromPin}
               showLocate
               onMapClick={handleMapClick}
+              poiSelectable={pickingLocation}
               flyToCenter={flyToCenter ?? undefined}
               searchFocus={searchFocus ?? undefined}
               searchPin={searchPin}
@@ -1406,7 +1422,7 @@ export default function App() {
                     <p className="picking-dialog-body">Tap the map to adjust it, or confirm below.</p>
                   </>
                 ) : (
-                  <p className="picking-dialog-title">Tap the map, or search a location/landmark, to choose this listing's location.</p>
+                  <p className="picking-dialog-title">Tap the map, tap a restaurant shown on it, or search a location/landmark, to choose this listing's location.</p>
                 )}
                 <button className="primary-button" onClick={() => setPickingDialogDismissed(true)}>OK</button>
               </div>

@@ -9,7 +9,13 @@ type Props = {
   listings: Listing[];
   onSelectListing: (id: string) => void;
   showLocate?: boolean;
-  onMapClick?: (latitude: number, longitude: number) => void;
+  onMapClick?: (latitude: number, longitude: number, placeId?: string) => void;
+  // Only ever true while the caller is in "pick a location for a new
+  // listing" mode (App.tsx passes pickingLocation). Google's base-map POI
+  // icons (restaurant/shop/transit) are otherwise deliberately non-clickable
+  // — see clickableIcons below for why — so this is the one place a tap on
+  // one of Google's own POIs is allowed to mean anything at all.
+  poiSelectable?: boolean;
   flyToCenter?: { center: [number, number]; token: number };
   // Moves the camera to show an *executed* search's result set — entirely
   // separate from flyToCenter (used by listing selection/location-picking)
@@ -58,6 +64,7 @@ export default function MapView({
   onSelectListing,
   showLocate,
   onMapClick,
+  poiSelectable,
   flyToCenter,
   searchFocus,
   searchPin,
@@ -111,6 +118,15 @@ export default function MapView({
   useEffect(() => {
     onMapClickRef.current = onMapClick;
   }, [onMapClick]);
+
+  // Same ref treatment as onMapClickRef above — read inside the click
+  // handler (defined once, inside the map-init effect below) without
+  // forcing that effect to tear down and recreate the whole map every time
+  // picking mode toggles on/off.
+  const poiSelectableRef = useRef(poiSelectable);
+  useEffect(() => {
+    poiSelectableRef.current = poiSelectable;
+  }, [poiSelectable]);
 
   // Same ref treatment, same reason — App.tsx doesn't wrap selectListing in
   // useCallback, so this prop gets a new function identity on every one of
@@ -205,7 +221,23 @@ export default function MapView({
           if (!cancelled) setMapLoading(false);
         });
 
-        map.addListener('click', (e: google.maps.MapMouseEvent) => {
+        map.addListener('click', (e: google.maps.MapMouseEvent | google.maps.IconMouseEvent) => {
+          // `placeId` only ever appears on the event at all when
+          // clickableIcons is on, which the effect below only does while
+          // poiSelectable is true — the poiSelectableRef check here is a
+          // second, defensive gate against a stale event landing in a race
+          // between a prop change and Google's own setOptions taking effect,
+          // so a POI tap can never be mistaken for a real pick outside
+          // picking mode. Calling e.stop() suppresses Google's native info
+          // card + recenter (the exact behavior clickableIcons: false was
+          // added to avoid — see below) so this reaches our own flow, and
+          // only ours, instead of both.
+          const placeId = 'placeId' in e ? e.placeId : undefined;
+          if (placeId && poiSelectableRef.current) {
+            e.stop();
+            if (e.latLng) onMapClickRef.current?.(e.latLng.lat(), e.latLng.lng(), placeId);
+            return;
+          }
           if (e.latLng) onMapClickRef.current?.(e.latLng.lat(), e.latLng.lng());
         });
 
@@ -246,6 +278,16 @@ export default function MapView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasKey, retryKey]);
+
+  // clickableIcons starts false (set in the map-init effect above) and is
+  // only ever flipped on here, while poiSelectable (App.tsx's
+  // pickingLocation) is true — never touching the map-init effect's own
+  // deps, so toggling picking mode on/off never tears down/rebuilds the map.
+  // Reverts to false the instant picking mode ends, so a POI tap is
+  // impossible during ordinary browsing.
+  useEffect(() => {
+    mapRef.current?.setOptions({ clickableIcons: Boolean(poiSelectable) });
+  }, [poiSelectable]);
 
   // Keep markers in sync with listings, and rebuild them on selection
   // changes too so the selected one's marker gets its highlighted style.

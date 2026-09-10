@@ -12,24 +12,19 @@
 // share.google links are a genuinely different shape: confirmed (repeatedly,
 // against real links) that they redirect to a plain google.com/search
 // results page, not a Maps page — there is no lat/lng anywhere in that URL,
-// only a place name (?q=) and a Knowledge Graph id. There's no coordinate to
-// extract in that case, so this falls back to a text search via the same
-// OLA Places autocomplete endpoint the app's own search bar already uses
-// (web/src/lib/olaPlaces.ts), biased toward Bengaluru (the app is
-// Bengaluru-only today). OLA's own ranking for a bare text query weighs
-// proximity over name match — confirmed against a real link where the
-// correct place came back 2nd, not 1st — so results are re-ranked by name
-// similarity (see bestPlaceMatch) rather than trusting predictions[0].
-// Returns that best match's coordinates instead of a finalUrl. This is an
-// approximation, not an exact pin — good enough to place the listing, not
-// guaranteed to be the identical spot Google's page was showing.
+// only a place name (?q=) and a Knowledge Graph id. There is deliberately no
+// fallback for this case: an earlier version approximated a coordinate via
+// an OLA Places text search on the extracted place name, but that is a
+// GUESS, not the actual location Google's page was showing — it violates
+// the location-safety rule this app now holds as absolute (never silently
+// guess a restaurant's coordinate). The client's own extraction
+// (extractGoogleCoordsFromUrl) finds nothing in a search-results URL either,
+// so this now just returns `finalUrl` unconditionally and lets that surface
+// as the same explicit "could not read that link" error the client already
+// shows for any other unresolvable link — a safe failure, not a wrong guess.
 //
 // Deploy with:
 //   npx supabase functions deploy resolve-maps-link --project-ref nvingzluboafxzxgxxwc
-// Requires the OLA_MAPS_API_KEY secret for the search-page fallback:
-//   npx supabase secrets set OLA_MAPS_API_KEY=<key> --project-ref nvingzluboafxzxgxxwc
-
-import { bestPlaceMatch as pickBestPlace, predictionsToPoints } from '../_shared/placeRanking.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,25 +37,6 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
-}
-
-// OLA's own ranking for a bare text query weighs proximity more than exact
-// name match — verified against a real share.google link ("Dhal roti &
-// more") where the actual place came back 2nd, not 1st, so blindly taking
-// predictions[0] silently returns the wrong business.
-//
-// The scoring (sliding-window edit distance against the query, plus a
-// POI-over-street_address tiebreak for identically-named candidates) now lives
-// in ../_shared/placeRanking.ts, shared with — and behaviourally identical to —
-// the web and mobile copies. See that module's header for why the type
-// tiebreak is needed: OLA returns street-address geocoder artifacts under the
-// exact same display name as the real restaurant, and this function's previous
-// private copy kept the first candidate on a tie, so it returned whichever OLA
-// ranked first (i.e. the nearest), which for "Juicy Spot" is a street address
-// 1,080 m from the actual place.
-function bestPlaceMatch(query: string, predictions: any[]): { lat: number; lng: number } | null {
-  const match = pickBestPlace(query, predictionsToPoints(predictions));
-  return match ? { lat: match.lat, lng: match.lng } : null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -105,35 +81,11 @@ Deno.serve(async (req: Request) => {
     return json({ error: e instanceof Error ? e.message : 'Failed to resolve link' }, 502);
   }
 
-  // share.google's redirect target — a Search results page, not Maps. Fall
-  // back to a places text search on the place name instead of the usual
-  // regex-on-URL coordinate extraction, since there's nothing to extract.
-  if (resolvedUrl.hostname === 'www.google.com' && resolvedUrl.pathname === '/search') {
-    const placeName = resolvedUrl.searchParams.get('q');
-    const olaKey = Deno.env.get('OLA_MAPS_API_KEY');
-    if (placeName && olaKey) {
-      try {
-        const searchParams = new URLSearchParams({
-          input: placeName,
-          api_key: olaKey,
-          location: '12.9716,77.5946', // same fixed Bengaluru center App.tsx uses when no viewer location is known
-        });
-        const searchResponse = await fetch(`https://api.olamaps.io/places/v1/autocomplete?${searchParams.toString()}`);
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json();
-          const match = bestPlaceMatch(placeName, searchData?.predictions ?? []);
-          if (match) {
-            return json({ latitude: match.lat, longitude: match.lng });
-          }
-        }
-      } catch {
-        // Falls through to returning finalUrl below — the client's own
-        // regexes will find nothing in a search URL either, but that's the
-        // same "could not read that link" outcome as before this fallback
-        // existed, not a new failure mode.
-      }
-    }
-  }
-
+  // share.google's redirect target is a Search results page, not Maps —
+  // there is no lat/lng in that URL and no attempt is made to guess one
+  // (see the header comment). The client's own extractGoogleCoordsFromUrl
+  // will find nothing in a search-results URL either and correctly returns
+  // null, surfacing as the same "could not read that link" error as any
+  // other unresolvable link — a safe failure, not a wrong guess.
   return json({ finalUrl: resolvedUrl.toString() });
 });

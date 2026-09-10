@@ -30,7 +30,11 @@ type Props = {
   // `pickedLocation`. `source` just tells the caller which explanatory
   // copy to show ("tap the map" vs. "confirm your GPS fix").
   onPickOnMap: (current: { lat: number; lon: number } | null, source?: 'manual' | 'current-location') => void;
-  pickedLocation?: { lat: number; lon: number; token: number; source: 'manual' | 'current-location' } | null;
+  // `placeId` is present only when the pick was a tap on one of Google's own
+  // base-map POI icons rather than a plain pin drop (see App.tsx's
+  // confirmAddThisPlace/MapView's poiSelectable) — real Google place
+  // identity, not a guess, so it's worth recording as provenance.
+  pickedLocation?: { lat: number; lon: number; token: number; source: 'manual' | 'current-location'; placeId?: string } | null;
   hidden?: boolean;
 };
 
@@ -56,6 +60,11 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   // See the Props comment on initialCoords for why 'ola' is the correct
   // starting value whenever a coordinate is already present at mount.
   const [locationSource, setLocationSource] = useState<LocationSource>(initialCoords ? 'ola' : 'unknown');
+  // A real Google place_id, captured only via a POI tap while picking on the
+  // map (see the Props comment on pickedLocation) — never set any other way,
+  // never guessed. Reset alongside every other location-setting path so a
+  // placeId from an earlier pick can never leak into a later, different one.
+  const [locationPlaceId, setLocationPlaceId] = useState<string | undefined>(undefined);
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [locating, setLocating] = useState(false);
   // Resolved from `coords` via reverse geocoding — a human-readable
@@ -104,8 +113,11 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     // distinction that matters for location_source is device_gps (raw,
     // unconfirmed — this app never actually does that) vs user_pin (a human
     // looked at the map and confirmed/placed the point), and this is always
-    // the latter.
-    setLocationSource('user_pin');
+    // the latter — UNLESS the pick was a tap on one of Google's own POI
+    // icons, which is real provider identity (not a guess) and worth
+    // recording as 'google' rather than the generic 'user_pin'.
+    setLocationSource(pickedLocation.placeId ? 'google' : 'user_pin');
+    setLocationPlaceId(pickedLocation.placeId);
     setLocationMode('current');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedLocation?.token]);
@@ -178,6 +190,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     }
     setCoords({ lat: parsed.latitude, lon: parsed.longitude });
     setLocationSource(parsed.source);
+    setLocationPlaceId(undefined);
     setMapsLink('');
   }
 
@@ -188,6 +201,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   function clearLocation() {
     setCoords(null);
     setLocationSource('unknown');
+    setLocationPlaceId(undefined);
     setError(null);
   }
 
@@ -290,6 +304,13 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
         // Stage 2A location provenance (0015) — set at every point above
         // that changes `coords`, never inferred here at submit time.
         location_source: locationSource,
+        // Real Google place identity captured by a POI tap — omitted
+        // entirely (not even `{}`) unless one was actually captured, so a
+        // plain pin-drop or paste-link submission never fabricates one.
+        // NOTE: as of this writing, 0015's INSERT-time trigger still forces
+        // this back to `{}` regardless of what's sent — a known, planned
+        // sequencing gap closed by a separate migration, not a bug here.
+        ...(locationPlaceId ? { provider_place_ids: { google: locationPlaceId } } : {}),
       });
 
       if ('error' in insertResult) {
