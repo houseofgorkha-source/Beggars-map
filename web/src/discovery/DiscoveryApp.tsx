@@ -147,7 +147,18 @@ export default function DiscoveryApp() {
     );
   }
 
+  // All three counts are pure recomputations over the current `candidates`
+  // array on every render — not separately-tracked incrementing counters —
+  // so there's nothing that can drift or double-count when a row is edited:
+  // updateCandidateLocally (passed to CandidateDetail as onSaved) replaces
+  // that one candidate in the array, and every count below just re-scans
+  // the whole (now-updated) array from scratch. Same source-of-truth
+  // fields the CLI's own workbench-sync.mjs status line uses (isReviewed
+  // mirrors its isReviewedDbRow exactly, per that function's own comment),
+  // no new state invented for this.
   const reviewedCount = candidates.filter(isReviewed).length;
+  const noAnswerCount = candidates.filter((c) => c.number_valid === 'No Answer').length;
+  const yesUnder100Count = candidates.filter((c) => c.menu_list_under_100 === 'Yes').length;
   const filtered = candidates.filter((c) => {
     if (filter === 'reviewed' && !isReviewed(c)) return false;
     if (filter === 'unreviewed' && isReviewed(c)) return false;
@@ -163,7 +174,9 @@ export default function DiscoveryApp() {
         <div>
           <h1>Discovery Workbench</h1>
           <p className="admin-muted">
-            {candidates.length === 0 ? 'No active batch' : `${reviewedCount} / ${candidates.length} reviewed in this batch`}
+            {candidates.length === 0
+              ? 'No active batch'
+              : `${reviewedCount} / ${candidates.length} reviewed · ${noAnswerCount} / ${candidates.length} no answer · ${yesUnder100Count} / ${candidates.length} yes menu under ₹100`}
           </p>
         </div>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
