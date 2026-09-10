@@ -219,7 +219,7 @@ The area-search logic itself (`resolveAreaMatches`, `AREA_MATCH_RADIUS_KM`, the 
 
 ## Verification
 
-`cd web && npx tsc --noEmit` and `npm run build` both clean after every change in this section. `npm test` (full repo suite): consistently 447 tests / 403 pass / 44 fail, the 44 failures being the same pre-existing `adminAuth.test.mjs`/`discoveryWorkbench.test.mjs`/`workbenchSync.test.mjs` local-Docker-state-dependent set AGENTS.md already documents — zero regressions from any change in this section, confirmed by name and count before and after. Verified the live production bundle directly (fetched, not assumed) both before this fix (to confirm the bug was genuinely deployed, not a stale-build artifact) and — see the deployment note appended below once pushed — after.
+`cd web && npx tsc --noEmit` and `npm run build` both clean after every change in this section. `npm test` (full repo suite): consistently ~403 passing regardless of run (one run counted 447 tests/44 fail, another 419/16 fail — the difference is `adminAuth.test.mjs`/`discoveryWorkbench.test.mjs` self-skipping when the local Docker stack isn't reachable at that moment, not a regression; the remaining failures are always exactly `workbenchSync.test.mjs`'s own pre-existing, known, local-state-dependent set) — zero regressions from any change in this section, confirmed by name and count before and after. Verified the live production bundle directly (fetched, not assumed) both before this fix (to confirm the bug was genuinely deployed, not a stale-build artifact) and after (see below): committed as `8c9b35e`/`eec7f76`/`0164dc6`, pushed, and **confirmed LIVE in production** within roughly a minute of pushing — the deployed `main-*.js`/`main-*.css` were fetched directly from `www.beggarsmap.com` and grepped for `right:40`/`bottom:140` (mobile padding), `right:380` (desktop padding, unchanged), `enterKeyHint`, `.blur()`, `location-info-popover`/`location-tab-with-info`, the `12.9723, 77.7345` example string, `.search-input-inline{...font-size:16px` (both phone rules), and `.modal-header{...z-index:1` — every one present. Homepage and `/admin.html` both still return `200`.
 
 No device/emulator was available in this environment for a real on-screen tap-through; all of the above is code-level, bundle-inspection, and build/test verified, not hand-tested on a physical phone.
 
@@ -281,8 +281,11 @@ This is the exact sequence both Batch 3 and Batch 4 followed end to end and is t
 
 ## Latest relevant commits
 
-- `ee6eb2c` — feat: keep map search within current city + fix paste-link safety + POI tap-to-select (see "Location Accuracy" above; `resolve-maps-link` redeployed live, web/Vercel deploy status unconfirmed)
-- `bb4e2bb` — fix: keep map search within current city context (see "Location Accuracy" above; web/Vercel deploy status unconfirmed)
+- `0164dc6` — docs: record Phase 2+3/Admin v2 production status, mobile-web fixes, and Add Listing location UX in CLAUDE.md
+- `eec7f76` — fix(web): mobile browser search camera zoom, keyboard dismissal, and enter-key hint (see "Mobile Web" above; **confirmed LIVE in production** via direct bundle fetch within ~1 minute of push)
+- `8c9b35e` — feat(web): simplify Add Listing location entry to paste-coordinates + add coordinate-help popover (see "Add Listing location UX polish" above; **confirmed LIVE in production**, same verification pass as `eec7f76`)
+- `ee6eb2c` — feat: keep map search within current city + fix paste-link safety + POI tap-to-select (see "Location Accuracy" above; `resolve-maps-link` redeployed live; web/Vercel deploy status **now confirmed live** — re-verified via direct bundle inspection during the mobile-web fix pass above, e.g. `clickableIcons`/`poiSelectable` and the `filterByBiasDistance` guard's `6371` constant both present in the deployed bundle)
+- `bb4e2bb` — fix: keep map search within current city context (see "Location Accuracy" above; web/Vercel deploy status **now confirmed live**, same re-verification as `ee6eb2c` above)
 - `7603b55` — feat: replace Plausible with GA4 + Cloudflare Web Analytics (see the dedicated section above; GA4 confirmed live in production 2026-09-10, Cloudflare not yet configured)
 - `baa26d6` — feat: Phase 5 — admin corrections & moderation (see the dedicated section above; deployed to production 2026-09-10)
 - `726bd8c` — fix: let map-pin Review reach Edit location without losing draft state (see "Map-popup Edit Location limitation — REMOVED" above; deployed to production)
