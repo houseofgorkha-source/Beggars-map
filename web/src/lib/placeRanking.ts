@@ -36,7 +36,71 @@ export type RankablePlace = {
    *  degrades to today's name-only behaviour instead of silently ranking
    *  everything last. */
   types?: string[];
+  /** Optional — only present when the caller actually has coordinates (e.g.
+   *  OLA's PlaceSuggestion). Used solely by the geographic sanity guard
+   *  below; callers with no coordinates (most existing tests) are
+   *  unaffected since that guard only runs when `near` is also supplied. */
+  latitude?: number;
+  longitude?: number;
 };
+
+// ---------------------------------------------------------------------------
+// Geographic sanity guard — NOT a proximity ranking system
+// ---------------------------------------------------------------------------
+// OLA's autocomplete can return near-identical restaurant names across
+// completely different cities. Confirmed live: querying "Vigneshwara
+// Tiffens" biased near Bengaluru returns FOUR Hyderabad/Secunderabad
+// predictions named "Vigneshwara Tiffins"/"Vigneshwara Tiffin's" alongside
+// the one real match, "Sri Vigneshwara Tiffen" in Bengaluru. The Hyderabad
+// candidates' exact-er name match (ratio 0.9474) beats the real match's
+// ratio (0.8947) by just enough (0.0527) to clear NAME_TIE_BAND (0.05), so
+// bestPlaceMatch picked a restaurant ~570 km away with no distance signal
+// ever in play.
+//
+// This guard runs BEFORE name-ranking and only ever removes candidates that
+// are obviously nowhere near the search: a generous 50 km radius around the
+// bias point (`near`), covering all of greater Bengaluru with room to
+// spare. It deliberately does not rank-by-distance among survivors — the
+// Juicy Spot case (all four candidates within ~8 km of each other, the
+// correct one being the FARTHEST of the four) is exactly why: preferring
+// nearer candidates within a metro area is wrong, but a candidate hundreds
+// of km away being a wrong city/region entirely is a different, much
+// coarser failure mode this alone exists to catch.
+//
+// City-context caveat: Bengaluru is currently the only enabled city (see
+// CITIES/BENGALURU_CENTER in App.tsx), and this 50km radius protects that
+// one search context. It is not itself city-aware — supporting a second
+// live city correctly needs real city-selection state/configuration passed
+// in as `near`, not a wider radius or another hardcoded constant here.
+export const MAX_BIAS_DISTANCE_KM = 50;
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Drops candidates farther than MAX_BIAS_DISTANCE_KM from `near`. No `near`
+ * (unknown bias point) is a no-op — the original, unfiltered candidate list
+ * is returned unchanged, never a crash and never unintended filtering. A
+ * candidate missing coordinates is kept rather than excluded: this guard
+ * can only rule something out when it actually has a distance to measure.
+ */
+export function filterByBiasDistance<T extends RankablePlace>(
+  places: T[],
+  near?: { latitude: number; longitude: number }
+): T[] {
+  if (!near) return places;
+  return places.filter((p) => {
+    if (typeof p.latitude !== 'number' || typeof p.longitude !== 'number') return true;
+    return haversineKm(near.latitude, near.longitude, p.latitude, p.longitude) <= MAX_BIAS_DISTANCE_KM;
+  });
+}
 
 // A prediction carrying any of these is a real place someone can walk into.
 const POI_TYPES = new Set([
@@ -150,17 +214,29 @@ export function scorePlaces<T extends RankablePlace>(query: string, places: T[])
  * similarity bar (a genuinely ambiguous query returns null rather than a bad
  * guess — unchanged contract).
  *
- * Selection is a two-pass, fully deterministic order rather than a running
- * comparison, because a banded comparison is not transitive and would make the
- * winner depend on array order:
+ * `near`, when supplied, first runs the geographic sanity guard above to drop
+ * candidates that are obviously nowhere near the search — see its own
+ * comment for why. Omitting `near` preserves the exact pre-existing
+ * behaviour (no filtering at all), so every existing caller/test that
+ * doesn't pass it is unaffected.
+ *
+ * Selection is otherwise the same two-pass, fully deterministic order rather
+ * than a running comparison, because a banded comparison is not transitive
+ * and would make the winner depend on array order:
  *   1. keep only candidates clearing MIN_MATCH_RATIO;
  *   2. take the best name ratio, keep everything within NAME_TIE_BAND of it;
  *   3. among those, highest type rank wins, then highest ratio, then earliest.
  */
-export function bestPlaceMatch<T extends RankablePlace>(query: string, places: T[]): T | null {
+export function bestPlaceMatch<T extends RankablePlace>(
+  query: string,
+  places: T[],
+  near?: { latitude: number; longitude: number }
+): T | null {
   if (!normalize(query)) return null;
 
-  const eligible = scorePlaces(query, places).filter((s) => s.ratio >= MIN_MATCH_RATIO);
+  const candidates = filterByBiasDistance(places, near);
+
+  const eligible = scorePlaces(query, candidates).filter((s) => s.ratio >= MIN_MATCH_RATIO);
   if (eligible.length === 0) return null;
 
   const topRatio = Math.max(...eligible.map((s) => s.ratio));

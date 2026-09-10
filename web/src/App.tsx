@@ -536,7 +536,7 @@ export default function App() {
   async function resolveAreaMatches(q: string, near: { lat: number; lon: number }) {
     const results = await searchPlaces(q, { latitude: near.lat, longitude: near.lon });
     const top =
-      bestPlaceMatch(q, results) ??
+      bestPlaceMatch(q, results, { latitude: near.lat, longitude: near.lon }) ??
       results.find((r) => placeTypeRank(r.types) === TYPE_RANK_POI) ??
       results[0];
     const center = top ? { lat: top.latitude, lon: top.longitude } : null;

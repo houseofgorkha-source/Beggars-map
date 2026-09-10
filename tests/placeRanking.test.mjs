@@ -195,6 +195,133 @@ for (const [label, impl] of IMPLS) {
 }
 
 // ---------------------------------------------------------------------------
+// Geographic sanity guard (web only) — the "Vigneshwara Tiffens" bug.
+//
+// Captured live from api.olamaps.io/places/v1/autocomplete, query
+// "Vigneshwara Tiffens", biased at Bengaluru center (12.9716, 77.5946).
+// Four of the five predictions are Hyderabad/Secunderabad restaurants of
+// the same or a near-identical name; only #1 is the real Bengaluru place.
+// Distances from the bias point: #0 498.7 km, #1 (real) 2.6 km, #2 508.8 km,
+// #3 509.8 km, #4 502.8 km — measured with the exact same haversine formula
+// the guard itself uses.
+//
+// This is deliberately a SEPARATE, web-only describe block, not another
+// pass through IMPLS: mobile's and the edge function's own copies of
+// placeRanking.ts were not touched, so they have no third `near` parameter
+// and nothing here applies to them.
+// ---------------------------------------------------------------------------
+const BENGALURU_CENTER = { latitude: 12.9716, longitude: 77.5946 };
+
+const VIGNESHWARA_PREDICTIONS = [
+  { name: 'Vigneshwara Tiffins', types: ['restaurant'], latitude: 17.3624, longitude: 78.5396 }, // Hyderabad, 498.7 km
+  { name: 'Sri Vigneshwara Tiffen', types: ['food', 'restaurant'], latitude: 12.972936, longitude: 77.570944 }, // Bengaluru, 2.6 km — the real match
+  { name: "Vigneshwara Tiffin's", types: ['store'], latitude: 17.4648, longitude: 78.4924 }, // Secunderabad, 508.8 km
+  { name: 'Vigneshwara Tiffins', types: ['restaurant'], latitude: 17.464743, longitude: 78.538658 }, // Hyderabad, 509.8 km
+  { name: "Vigneshwara Tiffin's", types: ['restaurant'], latitude: 17.4095, longitude: 78.4908 }, // Hyderabad, 502.8 km
+];
+
+describe('geographic sanity guard (web only)', () => {
+  const { bestPlaceMatch, filterByBiasDistance, MAX_BIAS_DISTANCE_KM } = web;
+
+  describe('1. the Vigneshwara Tiffens case', () => {
+    test('excludes the Hyderabad candidates and selects the real Bengaluru match', () => {
+      const match = bestPlaceMatch('Vigneshwara Tiffens', VIGNESHWARA_PREDICTIONS, BENGALURU_CENTER);
+      assert.ok(match, 'expected a match');
+      assert.equal(match.name, 'Sri Vigneshwara Tiffen');
+      assert.equal(match.latitude, 12.972936);
+      assert.equal(match.longitude, 77.570944);
+    });
+
+    test('without the sanity guard, the higher name-ratio Hyderabad candidate would have won', () => {
+      // Documents precisely what the bug was: with no `near` at all (the
+      // pre-fix call shape), name ratio alone picks a Hyderabad restaurant.
+      const unguarded = bestPlaceMatch('Vigneshwara Tiffens', VIGNESHWARA_PREDICTIONS);
+      assert.equal(unguarded.name, 'Vigneshwara Tiffins');
+      assert.notEqual(unguarded.latitude, 12.972936);
+    });
+
+    test('filterByBiasDistance alone drops exactly the four Hyderabad/Secunderabad entries', () => {
+      const kept = filterByBiasDistance(VIGNESHWARA_PREDICTIONS, BENGALURU_CENTER);
+      assert.equal(kept.length, 1);
+      assert.equal(kept[0].name, 'Sri Vigneshwara Tiffen');
+    });
+  });
+
+  describe('2. existing local ambiguity cases behave exactly as before', () => {
+    test('Juicy Spot: the guard is a no-op when near is omitted (unchanged call shape)', () => {
+      const match = bestPlaceMatch('Juicy Spot', JUICY_SPOT_PREDICTIONS);
+      assert.deepEqual(match.types, ['food', 'restaurant']);
+      assert.equal(match.latitude, 12.9459);
+    });
+
+    test('Dhal Roti: unchanged when near is omitted', () => {
+      const match = bestPlaceMatch('Dhal Roti and More', DHAL_ROTI_PREDICTIONS);
+      assert.equal(match.name, 'Dal Roti And More (North Indian Restaurant)');
+    });
+  });
+
+  describe('3. candidates within the 50km boundary still get normal name/type ranking', () => {
+    test('Juicy Spot case still resolves correctly WITH a near bias point supplied', () => {
+      // All four Juicy Spot candidates are within ~8km of Bengaluru center —
+      // comfortably inside MAX_BIAS_DISTANCE_KM — so supplying `near` here
+      // must not change the outcome at all; the existing name/type ranking
+      // (restaurant beats the three street-address artifacts) still decides.
+      const match = bestPlaceMatch('Juicy Spot', JUICY_SPOT_PREDICTIONS, BENGALURU_CENTER);
+      assert.deepEqual(match.types, ['food', 'restaurant']);
+      assert.equal(match.latitude, 12.9459);
+    });
+
+    test('filterByBiasDistance keeps every candidate within the radius untouched', () => {
+      const kept = filterByBiasDistance(JUICY_SPOT_PREDICTIONS, BENGALURU_CENTER);
+      assert.equal(kept.length, JUICY_SPOT_PREDICTIONS.length);
+      assert.deepEqual(kept, JUICY_SPOT_PREDICTIONS);
+    });
+  });
+
+  describe('4. a far-outside candidate cannot win purely on name similarity', () => {
+    test('a near-perfect name match 500km+ away loses to a real, in-range match', () => {
+      const candidates = [
+        { name: 'Exact Query Match', types: ['restaurant'], latitude: 17.3624, longitude: 78.5396 }, // Hyderabad, far
+        { name: 'Exact Query Matc', types: ['restaurant'], latitude: 12.98, longitude: 77.6 }, // Bengaluru, close, one char short
+      ];
+      const match = bestPlaceMatch('Exact Query Match', candidates, BENGALURU_CENTER);
+      assert.equal(match.name, 'Exact Query Matc');
+    });
+
+    test('a far candidate with no in-range alternative correctly returns null, not a bad guess', () => {
+      const candidates = [{ name: 'Vigneshwara Tiffins', types: ['restaurant'], latitude: 17.3624, longitude: 78.5396 }];
+      assert.equal(bestPlaceMatch('Vigneshwara Tiffens', candidates, BENGALURU_CENTER), null);
+    });
+  });
+
+  describe('5. near absent/null preserves existing behaviour', () => {
+    test('filterByBiasDistance with no near returns the identical array (no filtering)', () => {
+      const kept = filterByBiasDistance(VIGNESHWARA_PREDICTIONS);
+      assert.deepEqual(kept, VIGNESHWARA_PREDICTIONS);
+    });
+
+    test('filterByBiasDistance with near explicitly undefined is the same no-op', () => {
+      const kept = filterByBiasDistance(VIGNESHWARA_PREDICTIONS, undefined);
+      assert.deepEqual(kept, VIGNESHWARA_PREDICTIONS);
+    });
+
+    test('bestPlaceMatch called with the pre-existing 2-argument shape never throws', () => {
+      assert.doesNotThrow(() => bestPlaceMatch('Vigneshwara Tiffens', VIGNESHWARA_PREDICTIONS));
+    });
+
+    test('a candidate missing coordinates is kept, never excluded, even when near is supplied', () => {
+      const candidates = [{ name: 'No Coordinates Here', types: ['restaurant'] }];
+      const kept = filterByBiasDistance(candidates, BENGALURU_CENTER);
+      assert.equal(kept.length, 1);
+    });
+
+    test('MAX_BIAS_DISTANCE_KM is the documented 50km', () => {
+      assert.equal(MAX_BIAS_DISTANCE_KM, 50);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The Edge Function (resolve-maps-link) consumes RAW OLA predictions rather
 // than the mapped PlaceSuggestion shape the apps use, so it gets its own pass
 // over predictionsToPoints — the adapter where `types` is now preserved and
