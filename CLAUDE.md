@@ -263,7 +263,17 @@ Deliberately reworded from an earlier draft that said "...and paste them here" �
 
 `cd web && npx tsc --noEmit` and `npm run build` clean after every change in this pass. Full `npm test`: 403 passing consistently across every run; failure count fluctuated between runs (44 / 28 / 16 depending on which of `adminAuth.test.mjs`/`discoveryWorkbench.test.mjs` happened to self-skip due to local Docker stack reachability at that moment) but the *pass* count never moved and every failure was confirmed by name to be the same pre-existing `adminAuth`/`discoveryWorkbench`/`workbenchSync` local-state-dependent set — zero regressions from anything in this pass. No physical device/emulator was available to hand-test the actual right-click/long-press context menus; the `contentEditable` mechanism itself is standard, well-documented browser behavior, not something invented for this app, but the real on-device menus were not visually confirmed.
 
-# Current Project State (as of 2026-09-11)
+# CI pipeline fixed (2026-09-11 → 2026-09-12) — release deployment still pending explicit approval
+
+A "final production release" pass stalled on a red CI, diagnosed and fixed across three small, separately-authorized commits — each investigated and fixed one at a time, never bundled, per explicit instruction to stop and report rather than improvise past a failed check.
+
+- **`de59c03`** — root `tsconfig.json` was missing an explicit `include`, so TypeScript defaulted to discovering every `.ts`/`.tsx`/`.mjs` file under the repo root as a compilation root. `tests/*.test.mjs` files (picked up this way, via `allowJs`) import `web/src/lib/*.ts` directly, which pulled two web-only files (`extractDimensions.ts`, `supabase.ts` — both use web-specific tsconfig options this project doesn't set) into the root/mobile typecheck. Fixed by scoping `include` to `["App.tsx", "index.ts", "src"]` — config-only, no application logic touched.
+- **`011c644`** — with that fixed, CI was *still* red: `node --test "tests/*.test.mjs"` (quoted) passed the glob as a literal string for Node's own test runner to resolve, which worked on local Windows/Node 24 but failed outright on GitHub's Ubuntu runner (`Could not find '.../tests/*.test.mjs'`). Fixed by removing the quotes so the invoking shell expands the glob before Node ever sees it — verified identical behavior in both Git Bash and cmd.exe/PowerShell locally.
+- **`63b1500`** — with the glob now resolving, CI hit a *third*, previously-invisible failure: 6 test files (`dishes`/`extractDimensions`/`locationProvenance`/`placeRanking`/`reviews`/`searchCache`) crashed with `ERR_UNKNOWN_FILE_EXTENSION` on `.ts` imports, because `.github/workflows/ci.yml` pinned `node-version: 20` — Node 20 has no built-in TypeScript import support at all, unlike local's Node 24.18.0. Fixed by bumping both CI jobs to `node-version: 24` to match the actual dev/runtime environment. **This was masked the whole time by the first two bugs** — CI never got far enough to hit it until they were fixed.
+
+**CI is now fully green** (`63b1500`, run `34651735904`: both "Root tests + typecheck (mobile)" and "Web typecheck + build" passed). **Nothing has been deployed to Vercel as part of this pass** — per explicit instruction, production deployment is on hold pending separate, explicit approval after CI went green. If resuming this release: the next step is deploying the already-green `main` to the existing production Vercel project, then the full post-deploy verification checklist (homepage/map/search/listing-data/navigation, deployed commit matches `main`), not any further code changes.
+
+# Current Project State (as of 2026-09-12)
 
 Concise, factual snapshot of what is actually true right now — kept separate from the roadmap above, which is durable/forward-looking. Full narrative and historical detail for everything below lives in AGENTS.md; this section exists so a fresh session can get oriented without reading that much longer log first. Verify against AGENTS.md and production directly before relying on this for anything consequential — it decays the same way any status snapshot does.
 
@@ -358,6 +368,11 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- `78ad1cb` — docs: record Discovery Workbench Batch 8 push in CLAUDE.md
+- `a43885f` — docs: record Discovery Workbench Batch 7 closeout in CLAUDE.md (see the dedicated section above — 27 new listings imported and unhidden in production, verified via anon-key REST read)
+- `63b1500` — ci: run GitHub Actions on Node 24 to match local dev/runtime (see "CI pipeline fixed" above; **CI confirmed green**, Vercel deployment still pending explicit approval)
+- `011c644` — fix(ci): stop quoting the test glob so the shell expands it consistently (see "CI pipeline fixed" above)
+- `de59c03` — fix(ci): scope root tsconfig to mobile app source only (see "CI pipeline fixed" above)
 - `454191c` — feat(discovery): add current-batch progress counters to the Workbench header (see the dedicated section above; **confirmed LIVE in production** via direct bundle fetch, one transient ~15s Vercel propagation gap on the first check, resolved on retry)
 - `8f6a1f3` — feat(web): Add Listing photo copy/paste (contentEditable paste box, mirroring Discovery Workbench's own pattern), contextual "Can't find the restaurant?" help in the picking-dialog, and location-tabs/ⓘ-button visual polish (see "Add Listing: Photo Copy/Paste + Contextual Location Help" above; **confirmed LIVE in production**)
 - `a3e7d9b` — docs: record commit hashes and confirmed production verification in CLAUDE.md
