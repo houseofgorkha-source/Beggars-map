@@ -315,6 +315,13 @@ Closed out anyway, by explicit choice, rather than waiting for the remaining 13:
 - **The 13 rows that stayed unreviewed are now permanently marked `completed` in the state file**, same as Batch 5's own leftover unreviewed rows — `workbench-sync.mjs`'s push-eligibility check excludes any `completed` place_id regardless of whether its Excel cell is still blank, so these 13 will **not** automatically resurface in a future `--push`. If they should be re-offered to a future intern, that needs a deliberate, explicit state-file edit (remove them from `completed`) — not done here, since it wasn't asked for.
 - Final verified state: production **141 listings, 1 hidden** (unchanged pre-existing test row); local Discovery Workbench fully reconciled (0 in-progress, 553 completed, 3017 remaining eligible for a future batch).
 
+## Discovery Workbench Batch 8 — current batch, staged in production, NOT yet researched
+
+- Pushed locally with `workbench-sync.mjs --push --batch-size=100` (100 candidates, 0 photos — none of these place_ids have local photos on disk yet) and transferred to production the same way Batches 3/4/5/7 were (one-off `db query --linked` INSERT, explicit column list, same `sqlString`/`sqlNumber` escaping).
+- Confirmed live in production: `discovery_batch_rows` holds exactly batch_id `8`, 100 rows, 100 distinct place_ids, 100% match against the local set, 0 duplicates either direction. Production listings and `discovery-photos` bucket unaffected throughout (141 listings / 1 hidden, 0 photo objects, confirmed before and after).
+- Local status immediately after push: `Remaining eligible (blank, not yet pushed/completed): 2917`.
+- **Not yet researched by the intern.** Do NOT pull, purge, import, or publish Batch 8 until the intern's research is complete — as of now it is staged and visible to the intern, nothing more. Learn from Batches 5 and 7 above: check its actual review progress directly before assuming it's done, regardless of how much time has passed.
+
 ## The established Discovery Workbench batch lifecycle
 
 Production Workbench → Pull → verify Excel → purge Workbench → production import dry-run → import → verify → admin bulk unhide → final verification.
