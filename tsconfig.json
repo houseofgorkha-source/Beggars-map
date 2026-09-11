@@ -3,5 +3,23 @@
   "compilerOptions": {
     "strict": true
   },
+  // Explicit include is the actual fix: expo/tsconfig.base sets no `include`
+  // of its own, so TypeScript defaulted to discovering every .ts/.tsx (and,
+  // via allowJs, .mjs) file under the repo root as a compilation root —
+  // `exclude` alone (below) only stops a file from being treated as a root
+  // itself, it does NOT stop tsc from following imports INTO an excluded
+  // directory from a file that IS a root. That's exactly what happened:
+  // tests/*.test.mjs (picked up as roots via allowJs, having no include to
+  // scope them out) import web/src/lib/*.ts directly (e.g.
+  // tests/placeRanking.test.mjs imports '../web/src/lib/placeRanking.ts'),
+  // which pulled two unrelated web-only files into this project's own
+  // typecheck (web/src/lib/extractDimensions.ts, supabase.ts — both fail
+  // here since they use web-specific tsconfig options like
+  // allowImportingTsExtensions/import.meta.env that this project doesn't
+  // set). Scoping include to just the real mobile app source stops tsc from
+  // ever treating tests/*.mjs as a root, so it never follows those imports
+  // into web/ at all. `exclude` is kept as-is alongside this — harmless
+  // defense in depth, no longer load-bearing for the web/ case specifically.
+  "include": ["App.tsx", "index.ts", "src"],
   "exclude": ["node_modules", "supabase/functions", "web"]
 }
