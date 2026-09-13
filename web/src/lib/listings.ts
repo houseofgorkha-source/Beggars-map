@@ -43,6 +43,36 @@ export async function fetchListings(): Promise<{ data: ListingWithVoteCount[] } 
   return { data: data.map((row: any) => ({ ...row, voteCount: voteCounts.get(row.id) ?? 0 })) };
 }
 
+// Viewport-scoped fetch for the map's own markers — see App.tsx's
+// handleRegionChange for how this is debounced against map pan/zoom.
+// Deliberately separate from fetchListings(): search (textMatches in
+// App.tsx) still needs the full city-wide list regardless of what's
+// currently on screen, so that path is untouched — this function only
+// feeds what MapView actually renders as markers while the user isn't
+// actively searching. No vote-count join (map pins don't show it), and a
+// smaller cap than fetchListings' 2000: a single screen's viewport should
+// never legitimately need that many rows at once, and clustering already
+// bounds render cost regardless.
+const VIEWPORT_FETCH_LIMIT = 500;
+
+export async function fetchListingsInBounds(bounds: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}): Promise<{ data: Listing[] } | { error: string }> {
+  const { data, error } = await supabase
+    .from('listings')
+    .select(PUBLIC_LISTING_COLUMNS)
+    .gte('latitude', bounds.south)
+    .lte('latitude', bounds.north)
+    .gte('longitude', bounds.west)
+    .lte('longitude', bounds.east)
+    .limit(VIEWPORT_FETCH_LIMIT);
+  if (error || !data) return { error: error?.message ?? 'Could not load nearby listings.' };
+  return { data: data as unknown as Listing[] };
+}
+
 export async function fetchListing(id: string): Promise<{ data: Listing } | { data: null; notFound: true } | { error: string }> {
   const { data, error } = await supabase.from('listings').select(PUBLIC_LISTING_COLUMNS).eq('id', id).maybeSingle();
   if (error) return { error: error.message };

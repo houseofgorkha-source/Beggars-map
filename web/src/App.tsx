@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { supabase } from './lib/supabase';
-import { fetchListings } from './lib/listings';
+import { fetchListings, fetchListingsInBounds } from './lib/listings';
 import { searchPlaces, bestPlaceMatch, type PlaceSuggestion } from './lib/olaPlaces';
 import { placeTypeRank, TYPE_RANK_POI, filterByBiasDistance } from './lib/placeRanking';
 import { formatRelativeTime } from './lib/relativeTime';
@@ -133,6 +133,20 @@ export default function App() {
   const isMobilePortrait = useMediaQuery(MOBILE_PORTRAIT_QUERY);
   const [filters, updateFilters] = useFilterParams();
   const [listings, setListings] = useState<ListingWithVotes[]>([]);
+  // Viewport-scoped listings for the map's own markers — separate from
+  // `listings` above, which stays a full city-wide fetch and keeps powering
+  // search (textMatches) and the side-panel/bottom-sheet list exactly as
+  // before. Starts `null` (meaning "no viewport fetch has landed yet") so
+  // the map falls back to `filtered` (the full list) until the first one
+  // resolves — see mapMarkers below, and handleRegionChange for the actual
+  // debounced fetch this feeds.
+  const [mapListings, setMapListings] = useState<Listing[] | null>(null);
+  const regionFetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (regionFetchDebounceRef.current) clearTimeout(regionFetchDebounceRef.current);
+    };
+  }, []);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -486,6 +500,119 @@ export default function App() {
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trimmedQuery, listingsWithDistance, textMatches, areaListings, areaCenter, userLocation, filters]);
+
+  // The true geographic extent of every currently-loaded (city-wide,
+  // unfiltered) listing — used by handleRegionChange below to detect "the
+  // user's current view already covers the whole city" and, in that case,
+  // skip viewport-scoping entirely rather than let it silently omit
+  // listings outside whatever narrow box a fetch happened to run against.
+  // Recomputed only when the full listing set itself changes, not on every
+  // pan/zoom.
+  const cityBounds = useMemo(() => {
+    if (listingsWithDistance.length === 0) return null;
+    let west = Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let north = -Infinity;
+    for (const l of listingsWithDistance) {
+      if (l.longitude < west) west = l.longitude;
+      if (l.longitude > east) east = l.longitude;
+      if (l.latitude < south) south = l.latitude;
+      if (l.latitude > north) north = l.latitude;
+    }
+    return { west, south, east, north };
+  }, [listingsWithDistance]);
+
+  type LatLngBoundsBox = { west: number; south: number; east: number; north: number };
+
+  // True when `outer` fully encloses `inner` on every edge — i.e. nothing
+  // in `inner` could possibly lie outside `outer`.
+  function boundsContain(outer: LatLngBoundsBox, inner: LatLngBoundsBox): boolean {
+    return outer.west <= inner.west && outer.east >= inner.east && outer.south <= inner.south && outer.north >= inner.north;
+  }
+
+  // A fixed, reasoned margin for a genuinely viewport-scoped fetch (the
+  // "medium zoom: load the visible region plus margin" case) — half the
+  // current viewport's own span added on every side, so a moderate pan
+  // doesn't immediately require a fresh fetch to avoid a blank edge. This
+  // is unrelated to the bounds-containment check above; it never applies
+  // once that check has already decided to show everything.
+  const VIEWPORT_MARGIN_FACTOR = 0.5;
+
+  function padBounds(b: LatLngBoundsBox, factor: number): LatLngBoundsBox {
+    const lngSpan = b.east - b.west;
+    const latSpan = b.north - b.south;
+    return {
+      west: b.west - lngSpan * factor,
+      east: b.east + lngSpan * factor,
+      south: b.south - latSpan * factor,
+      north: b.north + latSpan * factor,
+    };
+  }
+
+  // Debounced viewport fetch for the map's own markers — MapView calls this
+  // on every settled pan/zoom (its own 'idle' listener), and this is where
+  // the actual "debounced map movement" requirement lives: rapid successive
+  // region-change events (a fast pan, a pinch-zoom) each reset this timer,
+  // so only the final settled viewport after movement pauses actually
+  // reaches Supabase. Only ever affects `mapListings` — search, dimension
+  // filters, and the side-panel/bottom-sheet list all read from the
+  // separate, full `listings`/`filtered` and are untouched by this.
+  //
+  // City-wide fallback (fixes a real bug, not a tuning tweak): once
+  // `mapListings` is set to anything, it used to stay set forever — so the
+  // very first viewport fetch (fired by the map's default zoom-12 view,
+  // which does not cover the real spread of listings across the metro
+  // area) permanently locked the map onto that narrow subset, even after
+  // the user zoomed out far enough to see the whole city. Checked directly
+  // against production: the bounding-box query itself is correct (it
+  // returns all 174 real listings when given the true full extent) — the
+  // bug was that the true full extent was never being asked for again once
+  // a narrower one had already resolved. Now, every region-change first
+  // checks whether the current viewport already contains the full known
+  // city extent (cityBounds above); if so, this clears any pending fetch
+  // and resets `mapListings` to null immediately (no network call needed —
+  // `mapMarkers` below already falls back to the full `filtered` list, and
+  // MarkerClusterer reduces it visually), so the map can always show
+  // literally everything at a city-wide zoom, then correctly resume
+  // viewport-scoping the moment the user zooms back in past that point.
+  const handleRegionChange = useCallback(
+    (bounds: LatLngBoundsBox) => {
+      if (regionFetchDebounceRef.current) clearTimeout(regionFetchDebounceRef.current);
+
+      if (cityBounds && boundsContain(bounds, cityBounds)) {
+        regionFetchDebounceRef.current = null;
+        setMapListings(null);
+        return;
+      }
+
+      const paddedBounds = padBounds(bounds, VIEWPORT_MARGIN_FACTOR);
+      regionFetchDebounceRef.current = setTimeout(async () => {
+        const result = await fetchListingsInBounds(paddedBounds);
+        if ('data' in result) setMapListings(result.data);
+      }, 400);
+    },
+    [cityBounds]
+  );
+
+  // Whether anything narrows the result set beyond plain city-wide browsing
+  // — an active text search, or one of the SEO dimension-filter query
+  // params (see `filtered` above). Any of these keeps the map showing the
+  // exact same `filtered` array as the list panel, unchanged from today;
+  // only genuinely plain browsing switches the map to the viewport-scoped
+  // fetch, since a search/filter result can legitimately be anywhere in the
+  // city, not just what's currently on screen.
+  const hasActiveFilter = Boolean(
+    trimmedQuery || filters.cuisine || filters.mealType || filters.dish || filters.location || filters.price
+  );
+
+  // What the map actually renders as markers. While a search or dimension
+  // filter is active, this is `filtered` — byte-identical to today's
+  // behavior. While plain browsing, it's the viewport-scoped `mapListings`
+  // once the first region fetch has landed, falling back to `filtered`
+  // (which equals the full list in that case) until then, so there's never
+  // a blank-map flash before MapView's first 'idle' event fires.
+  const mapMarkers = hasActiveFilter ? filtered : (mapListings ?? filtered);
 
   // Nearest-first when the viewer's own location is known, else
   // newest-first — mobile's own always-on browse-time ordering (unchanged).
@@ -1324,7 +1451,8 @@ export default function App() {
             onTouchCancel={isMobilePortrait ? handleHomeTouchEnd : undefined}
           >
             <MapView
-              listings={filtered}
+              listings={mapMarkers}
+              citywideListings={listingsWithDistance}
               onSelectListing={pickingLocation ? () => {} : selectListingFromPin}
               showLocate
               onMapClick={handleMapClick}
@@ -1337,6 +1465,7 @@ export default function App() {
               onListingUpdated={load}
               onOpenReview={setReviewListingId}
               hidePopup={pickingLocation}
+              onRegionChange={handleRegionChange}
               selectedDistanceKm={
                 // Shown on every breakpoint, not just mobile portrait. Still
                 // the SAME per-listing distance computed once in
