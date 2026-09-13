@@ -1230,30 +1230,6 @@ body {
   border-color: var(--pink-accent);
 }
 
-/* A cluster of nearby listings, rendered by MarkerClusterer's custom
-   renderer (see MapView.tsx) in place of the individual pins it groups at
-   the current zoom. Solid pink fill/white text mirrors .map-pin-selected's
-   own accent language deliberately, rather than the library's default
-   colored-circle-SVG look, so a cluster still reads as part of this app.
-   A round bubble (not a pill) keeps it visually distinct from an individual
-   listing pin at a glance. Clicking one zooms in to break it apart (the
-   library's own default cluster-click behavior — no custom handler). */
-.map-cluster-pin {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--pink-accent);
-  color: #fff;
-  font-weight: 700;
-  font-size: 13px;
-  border: 2px solid #fff;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.45);
-}
-
 /* A candidate location that isn't (yet) one of our own listings — current
    location, a manual map pick, or a landmark search result all share this
    one marker. Drawn as a real drop-pin (see the inline SVG in MapView.tsx)

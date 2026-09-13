@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MarkerClusterer } from '@googlemaps/markerclusterer';
 import { getMapId, hasGoogleMapsKey, loadMapsLibrary, loadMarkerLibrary } from '../lib/googleMaps';
 import ListingDetailModal from './ListingDetailModal';
 import type { Listing } from '../types';
 
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 }; // Bengaluru
+// Curated default zoom for the initial city-core view (see the map-init
+// effect and the markers effect's own comment for why this is fixed rather
+// than computed from the loaded listings).
+const DEFAULT_ZOOM = 13;
 
 // Mirrors App.tsx's own MOBILE_PORTRAIT_QUERY constant exactly (not
 // exported from there, so duplicated here rather than adding a new prop —
@@ -16,17 +19,6 @@ const MOBILE_PORTRAIT_QUERY = '(max-width: 720px) and (orientation: portrait)';
 
 type Props = {
   listings: Listing[];
-  // The true, unscoped, full city-wide listing set — used ONLY for the
-  // one-time "fit the camera to everything on first load" logic below.
-  // Deliberately separate from `listings` (what actually renders as
-  // markers, which App.tsx may narrow to the current viewport): if the
-  // initial fit read from `listings` instead, a viewport-scoped fetch that
-  // happens to resolve before this component's first render with real data
-  // could calibrate the initial camera to a subset instead of the whole
-  // city, defeating the point of ever being able to see everything by
-  // zooming out. Falls back to `listings` if omitted (keeps this prop
-  // optional for any future caller that never scopes its own listings).
-  citywideListings?: Listing[];
   onSelectListing: (id: string) => void;
   showLocate?: boolean;
   onMapClick?: (latitude: number, longitude: number, placeId?: string) => void;
@@ -87,7 +79,6 @@ type Props = {
 
 export default function MapView({
   listings,
-  citywideListings,
   onSelectListing,
   showLocate,
   onMapClick,
@@ -106,10 +97,6 @@ export default function MapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  // MarkerClusterer owns attaching/detaching each marker's own `.map` as
-  // clusters form/break apart on zoom — markers handed to it are created
-  // WITHOUT `map` set directly (see the markers effect below).
-  const clustererRef = useRef<MarkerClusterer | null>(null);
   // listing id -> its own marker + content element, so the selection-restyle
   // effect further below can restyle just the previously/newly selected pin
   // directly instead of the markers effect rebuilding the entire set on
@@ -138,7 +125,6 @@ export default function MapView({
   const selectedMarkerElRef = useRef<HTMLDivElement | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const hasFitInitialBoundsRef = useRef(false);
 
   const [mapLoading, setMapLoading] = useState(true);
   const [mapError, setMapError] = useState(false);
@@ -232,7 +218,7 @@ export default function MapView({
         const mapId = getMapId();
         const map = new Map(containerRef.current, {
           center: DEFAULT_CENTER,
-          zoom: 12,
+          zoom: DEFAULT_ZOOM,
           mapId,
           disableDefaultUI: true,
           // Google's own base-map points of interest (restaurant/shop/
@@ -263,25 +249,6 @@ export default function MapView({
           scrollwheel: false,
         });
         mapRef.current = map;
-
-        // Renders a cluster the same solid-pink/white-text accent language
-        // as .map-pin-selected uses (see styles.css's .map-cluster-pin) —
-        // deliberately not the library's own default colored-circle-SVG
-        // look, so a cluster reads as part of this app rather than a
-        // generic plugin. The default onClusterClick handler (fitBounds to
-        // the cluster) is left as-is — exactly the "zoom in to break it
-        // apart" behavior wanted here, no override needed.
-        clustererRef.current = new MarkerClusterer({
-          map,
-          renderer: {
-            render: ({ count, position }) => {
-              const el = document.createElement('div');
-              el.className = 'map-cluster-pin';
-              el.textContent = String(count);
-              return new google.maps.marker.AdvancedMarkerElement({ position, content: el });
-            },
-          },
-        });
 
         // Debounced (in App.tsx, via onRegionChange) viewport-scoped
         // listing fetch — this only reports the settled viewport; it never
@@ -354,8 +321,6 @@ export default function MapView({
       if (wheelHandler && container) container.removeEventListener('wheel', wheelHandler);
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
-      clustererRef.current?.clearMarkers();
-      clustererRef.current = null;
       markersRef.current.forEach((m) => (m.map = null));
       markersRef.current = [];
       markerByIdRef.current.clear();
@@ -401,7 +366,6 @@ export default function MapView({
       const { AdvancedMarkerElement } = await loadMarkerLibrary();
       if (cancelled) return;
 
-      clustererRef.current?.clearMarkers();
       markersRef.current.forEach((m) => (m.map = null));
       markersRef.current = [];
       markerByIdRef.current.clear();
@@ -420,10 +384,8 @@ export default function MapView({
         });
         if (isSelected) selectedMarkerElRef.current = el;
 
-        // No `map` here — MarkerClusterer (constructed in the map-init
-        // effect above) owns attaching each marker to the map (individually
-        // or folded into a cluster) once handed to it via addMarkers below.
         const marker = new AdvancedMarkerElement({
+          map,
           position: { lat: listing.latitude, lng: listing.longitude },
           content: el,
           // Above every other listing pin so the highlighted ring/scale
@@ -434,30 +396,16 @@ export default function MapView({
         markerByIdRef.current.set(listing.id, { marker, el });
       });
 
-      clustererRef.current?.addMarkers(markersRef.current);
-
-      // Fit the camera to all listings only once, the first time they load —
-      // not on every listings-array change. A reference-equality "skip if
-      // this update came from a search selection" guard used to live here,
-      // but it was fragile: any later re-render that produced a new
-      // `listings` array (e.g. typing further, or a listings reload) while
-      // `flyToCenter` itself happened to be unchanged would still pass the
-      // guard and fitBounds would snap the camera back, stomping whatever
-      // the user had just searched/panned to. Fitting once up front and
-      // leaving the camera alone afterwards removes that failure mode
-      // entirely — flyToCenter (search) and user gestures are the only
-      // things that move the camera from then on.
-      const fitSource = citywideListings ?? listings;
-      if (fitSource.length > 0 && !hasFitInitialBoundsRef.current) {
-        hasFitInitialBoundsRef.current = true;
-        const bounds = new google.maps.LatLngBounds();
-        fitSource.forEach((l) => bounds.extend({ lat: l.latitude, lng: l.longitude }));
-        map.fitBounds(bounds, 60);
-        google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-          const zoom = map.getZoom();
-          if (zoom !== undefined && zoom > 15) map.setZoom(15);
-        });
-      }
+      // The camera deliberately does NOT auto-fit to every loaded listing
+      // (an earlier version of this effect did) — as the real listing set
+      // spreads across the metro area, fitting to literally all of it
+      // zoomed out far past a useful "browsing the city" view, which is
+      // exactly the "too zoomed out" complaint that kept resurfacing. The
+      // map now always opens at the fixed DEFAULT_CENTER/DEFAULT_ZOOM set
+      // on the Map constructor above — a deliberately curated default view
+      // of the city core, not a computed one — and only moves from there
+      // via an explicit user action: search (searchFocus/flyToCenter below)
+      // or a manual pan/zoom gesture.
     })();
 
     return () => {
@@ -467,13 +415,7 @@ export default function MapView({
     // above for why including it here caused the popup-drift bug.
     // selectedListingId is also intentionally excluded — see this effect's
     // own opening comment for why; the selection-restyle effect below
-    // handles that case instead. citywideListings is read via closure only
-    // for the one-time fit (guarded by hasFitInitialBoundsRef, so it's only
-    // ever actually used once) — deliberately not a dependency, since it
-    // must never trigger a marker rebuild by itself; App.tsx's own
-    // listingsWithDistance is expected to already be populated by the same
-    // moment `listings` first goes non-empty (see this prop's own comment
-    // in the Props type for why).
+    // handles that case instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listings, mapLoading]);
 
@@ -658,26 +600,13 @@ export default function MapView({
 
     function measure() {
       const pinEl = selectedMarkerElRef.current;
-      // isConnected is false when clustering has folded this listing's own
-      // pin into a cluster bubble (MarkerClusterer sets the underlying
-      // AdvancedMarkerElement's .map to null, detaching its content from
-      // the DOM entirely) — a newly possible state now that clustering
-      // exists at all, previously every listing's pin was always
-      // individually attached. getBoundingClientRect() on a detached
-      // element returns an all-zero rect, which would otherwise place the
-      // popup at a nonsensical position — skip rendering it rather than
-      // show that. Not treated as an error: it clears the same way
-      // `if (!listing) return;` above already does when there's nothing
-      // sensible to anchor the popup to.
-      if (pinEl && pinEl.isConnected && containerEl) {
+      if (pinEl && containerEl) {
         const pinRect = pinEl.getBoundingClientRect();
         const containerRect = containerEl.getBoundingClientRect();
         setPopupPosition({
           x: pinRect.left + pinRect.width / 2 - containerRect.left,
           y: pinRect.top - containerRect.top,
         });
-      } else if (!pinEl || !pinEl.isConnected) {
-        setPopupPosition(null);
       }
       popupRafRef.current = requestAnimationFrame(measure);
     }

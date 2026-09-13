@@ -1452,7 +1452,6 @@ export default function App() {
           >
             <MapView
               listings={mapMarkers}
-              citywideListings={listingsWithDistance}
               onSelectListing={pickingLocation ? () => {} : selectListingFromPin}
               showLocate
               onMapClick={handleMapClick}
