@@ -109,7 +109,7 @@ export default function AdminApp() {
   if (authState === 'signed-out') {
     return (
       <div className="admin-shell">
-        <h1>Beggars Map — Admin</h1>
+        <h1>BudgetMap — Admin</h1>
         <p>Sign in with the admin Google account to continue.</p>
         <button className="admin-button" onClick={signIn}>
           Sign in with Google
@@ -121,7 +121,7 @@ export default function AdminApp() {
   if (authState === 'not-authorized') {
     return (
       <div className="admin-shell">
-        <h1>Beggars Map — Admin</h1>
+        <h1>BudgetMap — Admin</h1>
         <p>This account isn't authorized to view admin data.</p>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
           Sign out
@@ -135,7 +135,7 @@ export default function AdminApp() {
   return (
     <div className="admin-shell">
       <div className="admin-header">
-        <h1>Beggars Map — Admin</h1>
+        <h1>BudgetMap — Admin</h1>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
           Sign out ({adminEmail})
         </button>

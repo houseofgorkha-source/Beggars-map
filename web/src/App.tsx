@@ -335,7 +335,7 @@ export default function App() {
 
   // Update meta tags dynamically based on current filters
   const metaTags = useMemo(() => {
-    let title = 'Beggars Map — Affordable Eats in Bengaluru';
+    let title = 'BudgetMap — Affordable Eats in Bengaluru';
     let description = 'Crowdsourced map of affordable eats in Bengaluru, ₹100 or under. No login needed to browse or post.';
 
     const parts: string[] = [];
@@ -1426,7 +1426,7 @@ export default function App() {
         <div className="brand-block">
           <div className="brand">
             <Logo size={26} />
-            <span>Beggars Map</span>
+            <span>BudgetMap</span>
           </div>
           <div className="brand-sub">Affordable eats in Bengaluru, ₹100 or under</div>
         </div>
@@ -1440,7 +1440,7 @@ export default function App() {
 
         <div className="map-panel">
           <Breadcrumbs filters={filters} />
-          <p className="map-banner-tagline">Why do we call it Beggars Map? Why not? Why beat around the bush? 😄</p>
+          <p className="map-banner-tagline">Why do we call it BudgetMap? Why not? Why beat around the bush? 😄</p>
 
           <div
             className={`map-frame${isMobilePortrait && sheetState === 'list' && !pickingLocation ? ' list-mode-active' : ''}`}

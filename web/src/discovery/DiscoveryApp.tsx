@@ -126,7 +126,7 @@ export default function DiscoveryApp() {
   if (authState === 'signed-out') {
     return (
       <div className="discovery-shell-message">
-        <h1>Beggars Map — Discovery Workbench</h1>
+        <h1>BudgetMap — Discovery Workbench</h1>
         <p>Sign in with your Google account to continue.</p>
         <button className="admin-button" onClick={signIn}>
           Sign in with Google
@@ -138,7 +138,7 @@ export default function DiscoveryApp() {
   if (authState === 'not-authorized') {
     return (
       <div className="discovery-shell-message">
-        <h1>Beggars Map — Discovery Workbench</h1>
+        <h1>BudgetMap — Discovery Workbench</h1>
         <p>This account isn't authorized to review candidates.</p>
         <button className="admin-button admin-button-secondary" onClick={signOut}>
           Sign out

@@ -55,28 +55,28 @@ export default function LegalModal({ initialTab, onClose }: Props) {
 
               <div className="legal-notice">
                 <p className="legal-notice-title">A note on this document</p>
-                <p>This policy was written to accurately describe what Beggars Map's product actually does, but it is not legal advice and has not been reviewed by a lawyer. India's DPDP Act, 2023 governs personal data handling for Indian users — we'd recommend a qualified review before treating this as a final compliance document.</p>
+                <p>This policy was written to accurately describe what BudgetMap's product actually does, but it is not legal advice and has not been reviewed by a lawyer. India's DPDP Act, 2023 governs personal data handling for Indian users — we'd recommend a qualified review before treating this as a final compliance document.</p>
               </div>
             </>
           ) : (
             <>
-              <h3>What Beggars Map is</h3>
+              <h3>What BudgetMap is</h3>
               <p>A free, community-run directory of affordable eats (₹100 or under per plate/meal) in Bengaluru. Listings, prices, and reviews are submitted by users, not verified by us before they go live.</p>
 
               <h3>No warranty on listings</h3>
-              <p>A listed spot could be closed, its price could have changed, or its hygiene/quality is only as good as what other users have self-reported. Always use your own judgement — Beggars Map is a directory, not a guarantee.</p>
+              <p>A listed spot could be closed, its price could have changed, or its hygiene/quality is only as good as what other users have self-reported. Always use your own judgement — BudgetMap is a directory, not a guarantee.</p>
 
               <h3>Acceptable use</h3>
               <p>Don't post listings that aren't real food/eatery spots, spam, fake reviews, or content you don't have the right to share. We use automated checks and manual review, and may remove content or restrict access that violates this.</p>
 
               <h3>Content you submit</h3>
-              <p>You must own the rights to, or have permission to share, any photo or text you submit. By submitting it, you grant Beggars Map a license to display it within the app and site.</p>
+              <p>You must own the rights to, or have permission to share, any photo or text you submit. By submitting it, you grant BudgetMap a license to display it within the app and site.</p>
 
               <h3>Liability</h3>
-              <p>We're not responsible for your experience at any listed establishment, including food safety, pricing accuracy, or availability. Beggars Map only aggregates what the community submits.</p>
+              <p>We're not responsible for your experience at any listed establishment, including food safety, pricing accuracy, or availability. BudgetMap only aggregates what the community submits.</p>
 
               <h3>Changes to these terms</h3>
-              <p>We may update these terms as the product changes. Continuing to use Beggars Map after an update means you accept the revised terms.</p>
+              <p>We may update these terms as the product changes. Continuing to use BudgetMap after an update means you accept the revised terms.</p>
 
               <h3>Contact</h3>
               <p>Questions about these terms — call or WhatsApp <a href="tel:+919606002439">+91 96060 02439</a>.</p>

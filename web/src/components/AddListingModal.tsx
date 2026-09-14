@@ -349,7 +349,7 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
     if (!coords) return setError('Set a location using one of the options below.');
     const foodCheck = checkFoodRelevance(name, note);
     if (!foodCheck.ok) {
-      return setError(`Beggars Map is for affordable eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
+      return setError(`BudgetMap is for affordable eats only — this looks like it might be about "${foodCheck.matchedTerm}" instead.`);
     }
 
     setSubmitting(true);

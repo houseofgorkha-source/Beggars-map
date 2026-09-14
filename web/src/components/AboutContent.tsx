@@ -5,7 +5,7 @@ export default function AboutContent() {
     <>
       <div className="about-logo-block">
         <Logo size={60} />
-        <span className="about-logo-word">Beggars Map</span>
+        <span className="about-logo-word">BudgetMap</span>
       </div>
 
       <h2 className="about-lead">About Us</h2>
