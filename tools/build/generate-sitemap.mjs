@@ -142,7 +142,7 @@ async function main() {
   const urls = [];
 
   // Homepage
-  urls.push({ loc: 'https://www.beggarsmap.com/', changefreq: 'daily', priority: 1.0 });
+  urls.push({ loc: 'https://budgetmap.in/', changefreq: 'daily', priority: 1.0 });
 
   const singleDimAccepted = [];
   const singleDimRejected = [];
@@ -151,7 +151,7 @@ async function main() {
     for (const [value, count] of Object.entries(entries)) {
       if (count >= MIN_LISTINGS_FOR_INDEX) {
         urls.push({
-          loc: `https://www.beggarsmap.com/?${paramName}=${encodeURIComponent(value)}`,
+          loc: `https://budgetmap.in/?${paramName}=${encodeURIComponent(value)}`,
           changefreq: 'weekly',
           priority: calculatePriority(count, totalListings),
         });
@@ -185,7 +185,7 @@ async function main() {
     const params = combo.map(({ dim, value }) => [DIMENSION_TO_PARAM[dim], value]);
     const qs = buildQueryString(params);
     urls.push({
-      loc: `https://www.beggarsmap.com/?${qs}`,
+      loc: `https://budgetmap.in/?${qs}`,
       changefreq: 'weekly',
       priority: calculatePriority(count, totalListings),
     });

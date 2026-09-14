@@ -365,7 +365,7 @@ export default function App() {
       description,
       ogTitle: title,
       ogDescription: description,
-      ogUrl: `https://www.beggarsmap.com${window.location.search}`,
+      ogUrl: `https://budgetmap.in${window.location.search}`,
     };
   }, [filters]);
 

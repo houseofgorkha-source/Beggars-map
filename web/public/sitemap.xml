@@ -1,162 +1,162 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://www.beggarsmap.com/</loc>
+    <loc>https://budgetmap.in/</loc>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian</loc>
     <changefreq>weekly</changefreq>
     <priority>0.65</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=biryani</loc>
+    <loc>https://budgetmap.in/?cuisine=biryani</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=breakfast</loc>
+    <loc>https://budgetmap.in/?mealType=breakfast</loc>
     <changefreq>weekly</changefreq>
     <priority>0.66</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch</loc>
+    <loc>https://budgetmap.in/?mealType=lunch</loc>
     <changefreq>weekly</changefreq>
     <priority>0.68</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?location=koramangala</loc>
+    <loc>https://budgetmap.in/?location=koramangala</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?price=under-100</loc>
+    <loc>https://budgetmap.in/?price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?price=under-50</loc>
+    <loc>https://budgetmap.in/?price=under-50</loc>
     <changefreq>weekly</changefreq>
     <priority>0.67</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?price=under-75</loc>
+    <loc>https://budgetmap.in/?price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.63</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=breakfast</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=breakfast</loc>
     <changefreq>weekly</changefreq>
     <priority>0.66</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.65</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=breakfast&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?mealType=breakfast&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.66</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.66</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=lunch</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=lunch</loc>
     <changefreq>weekly</changefreq>
     <priority>0.69</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;price=under-50</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;price=under-50</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;price=under-75</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.68</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=breakfast&amp;price=under-50</loc>
+    <loc>https://budgetmap.in/?mealType=breakfast&amp;price=under-50</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=breakfast&amp;price=under-75</loc>
+    <loc>https://budgetmap.in/?mealType=breakfast&amp;price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.68</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch&amp;price=under-50</loc>
+    <loc>https://budgetmap.in/?mealType=lunch&amp;price=under-50</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch&amp;price=under-75</loc>
+    <loc>https://budgetmap.in/?mealType=lunch&amp;price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?mealType=lunch&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.68</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-50</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-50</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-75</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=breakfast&amp;price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.68</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=lunch&amp;price=under-75</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=lunch&amp;price=under-75</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=lunch&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=lunch&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.69</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=biryani&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?cuisine=biryani&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?location=koramangala&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?location=koramangala&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;location=koramangala</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;location=koramangala</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch&amp;location=koramangala</loc>
+    <loc>https://budgetmap.in/?mealType=lunch&amp;location=koramangala</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;mealType=lunch&amp;location=koramangala</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;mealType=lunch&amp;location=koramangala</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?cuisine=south-indian&amp;location=koramangala&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?cuisine=south-indian&amp;location=koramangala&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>
   <url>
-    <loc>https://www.beggarsmap.com/?mealType=lunch&amp;location=koramangala&amp;price=under-100</loc>
+    <loc>https://budgetmap.in/?mealType=lunch&amp;location=koramangala&amp;price=under-100</loc>
     <changefreq>weekly</changefreq>
     <priority>0.73</priority>
   </url>

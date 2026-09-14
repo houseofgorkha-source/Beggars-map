@@ -37,14 +37,14 @@ describe('web/public/sitemap.xml', () => {
     assert.ok(!/nearby|near-me|near_me/i.test(xml), 'sitemap.xml must never contain a near-me/nearby URL — that is a client-side geolocation feature, never crawlable/indexable');
   });
 
-  test('every <loc> is a well-formed beggarsmap.com URL', () => {
+  test('every <loc> is a well-formed budgetmap.in URL', () => {
     if (!existsSync(SITEMAP_PATH)) return;
     const xml = readFileSync(SITEMAP_PATH, 'utf8');
     const locs = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]);
     assert.ok(locs.length > 0);
     for (const loc of locs) {
       const url = new URL(loc);
-      assert.equal(url.hostname, 'www.beggarsmap.com');
+      assert.equal(url.hostname, 'budgetmap.in');
       assert.equal(url.protocol, 'https:');
     }
   });
