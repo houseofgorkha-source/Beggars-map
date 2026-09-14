@@ -7,6 +7,7 @@ import { placeTypeRank, TYPE_RANK_POI, filterByBiasDistance } from './lib/placeR
 import { formatRelativeTime } from './lib/relativeTime';
 import { distanceKm } from './lib/distance';
 import { filterByDimension, denormalizeDimensionValue } from './lib/extractDimensions';
+import { computeCanonicalUrl } from './lib/canonicalUrl';
 import { useFilterParams } from './hooks/useFilterParams';
 import { useMetaTags } from './hooks/useMetaTags';
 import MapView from './components/MapView';
@@ -360,12 +361,15 @@ export default function App() {
       description = `Find ${parts.join(' ')} under ₹100 in Bengaluru. Crowdsourced, no login needed.`;
     }
 
+    const canonicalUrl = computeCanonicalUrl(filters, window.location.search);
+
     return {
       title,
       description,
       ogTitle: title,
       ogDescription: description,
       ogUrl: `https://budgetmap.in${window.location.search}`,
+      canonicalUrl,
     };
   }, [filters]);
 

@@ -359,7 +359,9 @@ export default function ReviewOverlay({
           // listing's own inside the same shared bucket.
           const uploaded: { url: string; path: string }[] = [];
           for (const file of photoFiles) {
-            const ext = file.name.split('.').pop() ?? 'jpg';
+            // Sanitized (security hardening, Batch 7) — see AddListingModal.tsx's
+            // identical comment for why.
+            const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
             const path = `${userId}/reviews/${result.id}/${Date.now()}-${uploaded.length}.${ext}`;
             const { error: uploadError } = await supabase.storage.from('listing-photos').upload(path, file, {
               contentType: file.type || `image/${ext}`,

@@ -307,7 +307,12 @@ export default function AddListingModal({ onClose, onPosted, initialCoords, onPi
   async function uploadPhotos(userId: string): Promise<{ url: string; path: string }[]> {
     const uploaded: { url: string; path: string }[] = [];
     for (const [i, file] of photoFiles.entries()) {
-      const ext = file.name.split('.').pop() ?? 'jpg';
+      // Sanitized (security hardening, Batch 7): a raw filename-derived
+      // extension is user-controlled and could otherwise carry `/`/`..`
+      // into the storage object key — bounded/non-exploitable today since
+      // the bucket policy only inspects the leading `${userId}/` segment,
+      // but stripped here as defense-in-depth rather than relying on that.
+      const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
       const path = `${userId}/${Date.now()}-${i}.${ext}`;
       const { error: uploadError } = await supabase.storage.from('listing-photos').upload(path, file, {
         contentType: file.type || `image/${ext}`,

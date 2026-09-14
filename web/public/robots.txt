@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
 Disallow: /admin.html
+Disallow: /discovery.html
 
 Sitemap: https://budgetmap.in/sitemap.xml

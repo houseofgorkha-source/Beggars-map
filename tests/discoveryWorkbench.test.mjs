@@ -350,5 +350,43 @@ describe('Discovery Workbench auth boundary + CRUD (Phase 1)', { skip: !stackRea
       assert.equal(res.status, 400);
       assert.match(res.data.error, /JPEG, PNG, or WebP/);
     });
+
+    // SSRF guard (S1) — addPhotoFromUrl must never actually fetch a
+    // private/internal address, directly or via DNS. Each case here is
+    // rejected before any fetch touches the target, so none of them affect
+    // the shared photo-cap state (still 1 photo present from the previous
+    // test, cap is 2).
+    describe('addPhotoFromUrl SSRF guard (S1)', () => {
+      const rejected = [
+        ['localhost', 'http://localhost/evil.png'],
+        ['localhost with port', 'http://localhost:8080/evil.png'],
+        ['IPv4 loopback', 'http://127.0.0.1/evil.png'],
+        ['IPv4 10.0.0.0/8', 'http://10.1.2.3/evil.png'],
+        ['IPv4 192.168.0.0/16', 'http://192.168.1.1/evil.png'],
+        ['IPv4 172.16.0.0/12', 'http://172.16.5.5/evil.png'],
+        ['IPv4 link-local (cloud metadata range)', 'http://169.254.169.254/latest/meta-data/'],
+        ['IPv6 loopback', 'http://[::1]/evil.png'],
+        ['IPv6 unique-local', 'http://[fc00::1]/evil.png'],
+        ['IPv6 link-local', 'http://[fe80::1]/evil.png'],
+        ['non-http(s) scheme', 'file:///etc/passwd'],
+      ];
+      for (const [label, imageUrl] of rejected) {
+        test(`rejects ${label}`, async () => {
+          const res = await callFn(discoveryJwt, { action: 'addPhotoFromUrl', placeId: FIXTURE_PLACE_ID, imageUrl });
+          assert.equal(res.status, 400, JSON.stringify(res.data));
+          // Never the generic "could not fetch" — confirms the guard itself
+          // rejected it before attempting any network call.
+          assert.ok(!/^Could not fetch that image URL \(\d/.test(res.data.error ?? ''), res.data.error);
+        });
+      }
+
+      // Not covered here (documented limitation, not an oversight): a
+      // "public hostname that resolves to a private address" (DNS
+      // rebinding) and a "public URL that redirects to a private one" case
+      // both need an externally-reachable test server this environment
+      // doesn't have — the guard's redirect-revalidation and DNS-resolution
+      // logic is covered by direct code review instead (see the security
+      // remediation report).
+    });
   });
 });

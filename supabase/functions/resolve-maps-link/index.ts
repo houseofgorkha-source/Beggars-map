@@ -1,5 +1,5 @@
-// Resolves a Google Maps short link (maps.app.goo.gl / goo.gl / share.google)
-// to its final redirect URL.
+// Resolves a Google Maps short link (maps.app.goo.gl / goo.gl / share.google /
+// g.co) to its final redirect URL.
 //
 // This can't be done from the browser directly: web/src/lib/googleMapsLink.ts
 // used to `fetch()` the short link straight from client code, but a browser
@@ -68,17 +68,25 @@ Deno.serve(async (req: Request) => {
   // this function is an open, unauthenticated URL-redirect resolver anyone
   // could point at an arbitrary target (SSRF/abuse), not just Google Maps
   // links.
-  const isGoogleShortLink = parsed.hostname === 'goo.gl' || parsed.hostname.endsWith('.goo.gl') || parsed.hostname === 'share.google';
+  const isGoogleShortLink =
+    parsed.hostname === 'goo.gl' || parsed.hostname.endsWith('.goo.gl') || parsed.hostname === 'share.google' || parsed.hostname === 'g.co';
   if (!isGoogleShortLink) {
-    return json({ error: 'Only goo.gl / share.google short links are supported' }, 400);
+    return json({ error: 'Only goo.gl / share.google / g.co short links are supported' }, 400);
   }
 
   let resolvedUrl: URL;
   try {
-    const response = await fetch(parsed.toString());
+    // Explicit timeout (S9) — this is a fully public, unauthenticated
+    // endpoint with no rate limiting, so an unbounded outbound fetch is a
+    // resource-exhaustion vector reachable by anyone with no login at all.
+    const response = await fetch(parsed.toString(), { signal: AbortSignal.timeout(8000) });
     resolvedUrl = new URL(response.url || parsed.toString());
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : 'Failed to resolve link' }, 502);
+  } catch {
+    // Genericized (security hardening, Batch 7) — this is the one fully
+    // public, unauthenticated function in this schema; the raw fetch
+    // error (timeout/DNS/network-stack detail) served no purpose to the
+    // caller and unnecessarily surfaced internal detail.
+    return json({ error: 'Failed to resolve that link.' }, 502);
   }
 
   // share.google's redirect target is a Search results page, not Maps —

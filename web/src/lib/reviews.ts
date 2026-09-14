@@ -18,7 +18,6 @@ export type { ReviewValidation };
 export type ListingReview = {
   id: string;
   listing_id: string;
-  created_by: string;
   rating: number | null;
   review_text: string | null;
   created_at: string;
@@ -49,7 +48,15 @@ async function attachPhotos(rows: Omit<ListingReview, 'photos'>[]): Promise<List
   return rows.map((r) => ({ ...r, photos: photosByReview.get(r.id) ?? [] }));
 }
 
-const REVIEW_COLUMNS = 'id, listing_id, created_by, rating, review_text, created_at, updated_at';
+const REVIEW_COLUMNS = 'id, listing_id, rating, review_text, created_at, updated_at';
+
+// Reads go through listing_reviews_public / the get_my_review RPC rather
+// than the listing_reviews table directly (security remediation S8,
+// migration 0030) — the table itself has zero grant to anon/authenticated
+// any more, mirroring the same privacy boundary 0019 already established
+// for votes (created_by is never publicly bulk-enumerable). Writes go
+// through the upsert_my_review RPC for the same reason — it hardcodes
+// auth.uid() server-side rather than trusting a client-supplied userId.
 
 // Newest-first, capped — same rationale as fetchListings' LISTING_FETCH_LIMIT:
 // an explicit bound instead of relying on PostgREST's implicit max_rows
@@ -58,7 +65,7 @@ const REVIEW_COLUMNS = 'id, listing_id, created_by, rating, review_text, created
 // in principle be older than the most recent 20.
 export async function fetchListingReviews(listingId: string): Promise<{ data: ListingReview[] } | { error: string }> {
   const { data, error } = await supabase
-    .from('listing_reviews')
+    .from('listing_reviews_public')
     .select(REVIEW_COLUMNS)
     .eq('listing_id', listingId)
     .order('created_at', { ascending: false })
@@ -67,15 +74,11 @@ export async function fetchListingReviews(listingId: string): Promise<{ data: Li
   return { data: await attachPhotos(data ?? []) };
 }
 
-export async function fetchMyReview(listingId: string, userId: string): Promise<ListingReview | null> {
-  const { data } = await supabase
-    .from('listing_reviews')
-    .select(REVIEW_COLUMNS)
-    .eq('listing_id', listingId)
-    .eq('created_by', userId)
-    .maybeSingle();
-  if (!data) return null;
-  const [withPhotos] = await attachPhotos([data]);
+export async function fetchMyReview(listingId: string, _userId: string): Promise<ListingReview | null> {
+  const { data } = await supabase.rpc('get_my_review', { p_listing_id: listingId });
+  const row = data?.[0];
+  if (!row) return null;
+  const [withPhotos] = await attachPhotos([row]);
   return withPhotos;
 }
 
@@ -90,19 +93,11 @@ export async function submitListingReview(input: {
   rating: number | null;
   reviewText: string | null;
 }): Promise<{ id: string } | { error: string }> {
-  const { data, error } = await supabase
-    .from('listing_reviews')
-    .upsert(
-      {
-        listing_id: input.listingId,
-        created_by: input.userId,
-        rating: input.rating,
-        review_text: input.reviewText,
-      },
-      { onConflict: 'listing_id,created_by' }
-    )
-    .select('id')
-    .single();
+  const { data, error } = await supabase.rpc('upsert_my_review', {
+    p_listing_id: input.listingId,
+    p_rating: input.rating,
+    p_review_text: input.reviewText,
+  });
   if (error || !data) return { error: error?.message ?? 'Could not submit your review.' };
-  return { id: data.id };
+  return { id: data };
 }

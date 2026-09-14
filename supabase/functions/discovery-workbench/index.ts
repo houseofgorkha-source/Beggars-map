@@ -45,6 +45,124 @@ function extensionFromFilename(filename: string): string {
   return idx === -1 ? '' : filename.slice(idx + 1).toLowerCase();
 }
 
+// ---- SSRF guard for addPhotoFromUrl ----
+// addPhotoFromUrl fetches an intern-supplied URL server-side. Without this,
+// a DISCOVERY_EMAILS-allowlisted account (lower trust than a full admin,
+// by design) could point this function at an internal/cloud-metadata
+// address and use response differences (timeout vs. refused vs. a stored,
+// signed-URL-retrievable image) as a working SSRF/probe primitive. This
+// guard runs AFTER the existing verifyAllowlist() check — it narrows what
+// an already-authorized intern's own action can reach, it does not touch
+// or weaken who is authorized to call this function at all.
+//
+// Two layers: (1) the URL's own hostname, checked directly if it's already
+// an IP literal; (2) for a real hostname, every address DNS resolution
+// returns for it (both A and AAAA, not just the first answer) — a hostname
+// that looks public but resolves to a private address (DNS rebinding) is
+// rejected the same way a direct private-IP URL is. Redirects are never
+// followed automatically (`redirect: 'manual'`) — each hop's destination is
+// re-validated through this same check before being followed, capped at
+// MAX_REDIRECTS hops.
+
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return false;
+  const [a, b, c] = parts;
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 127) return true; // loopback
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 0) return true; // 0.0.0.0/8 "this network"
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 carrier-grade NAT
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24, 192.0.2.0/24 (reserved/test)
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
+  if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 (test)
+  if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 (test)
+  if (a >= 224) return true; // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, 255.255.255.255 broadcast
+  return false;
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const norm = ip.toLowerCase();
+  if (norm === '::1' || norm === '::') return true; // loopback / unspecified
+  if (/^fe[89ab][0-9a-f]:/.test(norm)) return true; // fe80::/10 link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(norm)) return true; // fc00::/7 unique local (private)
+  if (norm.startsWith('ff')) return true; // ff00::/8 multicast
+  const mapped = norm.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); // IPv4-mapped — check the embedded address
+  if (mapped) return isPrivateIPv4(mapped[1]);
+  return false;
+}
+
+function isPrivateIPLiteral(host: string): boolean {
+  const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host; // strip [::1]-style brackets
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(bare)) return isPrivateIPv4(bare);
+  if (bare.includes(':')) return isPrivateIPv6(bare);
+  return false;
+}
+
+async function isPubliclyRoutableUrl(rawUrl: string): Promise<{ ok: true; url: URL } | { ok: false; reason: string }> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: 'Invalid URL' };
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, reason: 'Only http/https URLs are allowed' };
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    return { ok: false, reason: 'localhost is not allowed' };
+  }
+  if (isPrivateIPLiteral(hostname)) {
+    return { ok: false, reason: 'Private/internal address is not allowed' };
+  }
+
+  let addresses: string[] = [];
+  try {
+    const [v4, v6] = await Promise.allSettled([Deno.resolveDns(hostname, 'A'), Deno.resolveDns(hostname, 'AAAA')]);
+    if (v4.status === 'fulfilled') addresses.push(...v4.value);
+    if (v6.status === 'fulfilled') addresses.push(...v6.value);
+  } catch {
+    // fall through — empty addresses is rejected below either way.
+  }
+  if (addresses.length === 0) {
+    return { ok: false, reason: 'Could not resolve that host' };
+  }
+  if (addresses.some((ip) => isPrivateIPLiteral(ip))) {
+    return { ok: false, reason: 'That host resolves to a private/internal address' };
+  }
+  return { ok: true, url };
+}
+
+const MAX_REDIRECTS = 3;
+
+async function fetchImageSafely(startUrl: string): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
+  let currentUrl = startUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const check = await isPubliclyRoutableUrl(currentUrl);
+    if (!check.ok) return { ok: false, error: check.reason };
+
+    let response: Response;
+    try {
+      response = await fetch(check.url.toString(), { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    } catch {
+      return { ok: false, error: 'Could not fetch that image URL' };
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) return { ok: false, error: `Could not fetch that image URL (${response.status})` };
+      if (hop === MAX_REDIRECTS) return { ok: false, error: 'Too many redirects' };
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+    return { ok: true, response };
+  }
+  return { ok: false, error: 'Too many redirects' };
+}
+
 // Every photo action must first confirm placeId belongs to the currently
 // active batch — an intern's browser must never be able to read/write
 // photos for a candidate that isn't in front of them, even by guessing a
@@ -255,12 +373,9 @@ Deno.serve(async (req: Request) => {
       return json({ error: `Maximum ${MAX_PHOTOS} photos per candidate` }, 400);
     }
 
-    let response: Response;
-    try {
-      response = await fetch(imageUrl, { signal: AbortSignal.timeout(10000) });
-    } catch {
-      return json({ error: 'Could not fetch that image URL' }, 400);
-    }
+    const fetchResult = await fetchImageSafely(imageUrl);
+    if (!fetchResult.ok) return json({ error: fetchResult.error }, 400);
+    const response = fetchResult.response;
     if (!response.ok) return json({ error: `Could not fetch that image URL (${response.status})` }, 400);
 
     const contentType = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
@@ -283,6 +398,15 @@ Deno.serve(async (req: Request) => {
     if (!body.placeId) return json({ error: 'Missing placeId' }, 400);
     const filename = body.filename;
     if (!filename || typeof filename !== 'string') return json({ error: 'Missing filename' }, 400);
+    // Every filename this function itself ever generates (createPhotoUploadUrl,
+    // addPhotoFromUrl) matches this exact shape — reject anything else
+    // outright rather than passing a client-supplied string straight into a
+    // storage path (defense-in-depth; Storage's own opaque-key model means
+    // this was never an actual traversal risk, but an explicit allowlist is
+    // cheap and self-documenting).
+    if (!/^[0-9]+-[0-9a-f]{8}\.(jpg|jpeg|png|webp)$/.test(filename)) {
+      return json({ error: 'Invalid filename' }, 400);
+    }
 
     if (!(await candidateExists(client, body.placeId))) {
       return json({ error: 'Candidate not found in the active batch' }, 404);

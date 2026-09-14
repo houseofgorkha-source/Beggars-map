@@ -398,7 +398,14 @@ describe('resolve-maps-link (static source check)', () => {
   });
 
   test('normal redirect resolution is untouched: still follows the redirect and returns finalUrl', () => {
-    assert.ok(source.includes('fetch(parsed.toString())'), 'expected the redirect-following fetch to still be present');
+    // Updated for security remediation S9 (2026-09-15): the fetch now
+    // carries an explicit AbortSignal timeout, so the exact call shape
+    // changed from `fetch(parsed.toString())` to
+    // `fetch(parsed.toString(), { signal: ... })` — still the same
+    // redirect-following fetch on the same target, just no longer
+    // unbounded.
+    assert.ok(source.includes('fetch(parsed.toString(),'), 'expected the redirect-following fetch to still be present');
+    assert.ok(source.includes('AbortSignal.timeout'), 'expected the fetch to carry an explicit timeout (S9)');
     assert.ok(source.includes('finalUrl: resolvedUrl.toString()'), 'expected the function to still return finalUrl');
   });
 

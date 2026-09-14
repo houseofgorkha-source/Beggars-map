@@ -6,6 +6,7 @@ export interface MetaTags {
   ogTitle?: string;
   ogDescription?: string;
   ogUrl?: string;
+  canonicalUrl?: string;
 }
 
 export function useMetaTags(tags: MetaTags) {
@@ -29,5 +30,15 @@ export function useMetaTags(tags: MetaTags) {
     if (tags.ogTitle) updateMeta('og:title', tags.ogTitle);
     if (tags.ogDescription) updateMeta('og:description', tags.ogDescription);
     if (tags.ogUrl) updateMeta('og:url', tags.ogUrl);
+
+    if (tags.canonicalUrl) {
+      let link = document.querySelector('link[rel="canonical"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.setAttribute('rel', 'canonical');
+        document.head.appendChild(link);
+      }
+      link.setAttribute('href', tags.canonicalUrl);
+    }
   }, [tags]);
 }
