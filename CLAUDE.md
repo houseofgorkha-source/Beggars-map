@@ -446,6 +446,7 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- `2982ff7` — docs: record Discovery Workbench Batch 9 closeout in CLAUDE.md (see the dedicated section above — 29 new listings imported and unhidden in production, verified via anon-key REST reads; production went 176 → 205 listings, 1 hidden)
 - `bb4d66b` — fix: make content moderation importer-safe (0032, see "Security remediation (c4eae0f)" above's follow-up #1 — **applied to production 2026-09-15**, DB-only, no Edge Function redeploy needed)
 - `8aaaab7` — docs: close out BudgetMap production security rollout (see "Security remediation (c4eae0f)" above)
 - `c4eae0f` — fix: security remediation pass (SSRF, RLS gaps, content moderation, rate limiting, review privacy, SEO canonical, hardening) — see the dedicated section above; **production rollout COMPLETE 2026-09-15** (migrations 0026–0031 applied, `discovery-workbench`/`resolve-maps-link` redeployed)
