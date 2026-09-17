@@ -471,6 +471,7 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- `338d281` — docs: record Discovery Workbench Batch 11 push+transfer in CLAUDE.md (see the dedicated section above — pushed and transferred to production for intern review, not yet closed out; 100 rows staged, 2717 → 2617 remaining eligible)
 - `7c42b19` — docs: record Discovery Workbench Batch 10 closeout in CLAUDE.md (see the dedicated section above — 29 new listings imported and unhidden in production, verified via anon-key REST reads; production went 205 → 234 listings, 1 hidden)
 - `2982ff7` — docs: record Discovery Workbench Batch 9 closeout in CLAUDE.md (see the dedicated section above — 29 new listings imported and unhidden in production, verified via anon-key REST reads; production went 176 → 205 listings, 1 hidden)
 - `bb4d66b` — fix: make content moderation importer-safe (0032, see "Security remediation (c4eae0f)" above's follow-up #1 — **applied to production 2026-09-15**, DB-only, no Edge Function redeploy needed)
