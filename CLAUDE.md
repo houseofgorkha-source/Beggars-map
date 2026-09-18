@@ -498,6 +498,7 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- `60784be` — docs: record Discovery Workbench Batch 13 push+transfer in CLAUDE.md (see the dedicated section above — pushed and transferred to production for intern review, not yet closed out; 100 rows staged, 2517 → 2417 remaining eligible)
 - `993fcf8` — docs: record Discovery Workbench Batch 12 closeout in CLAUDE.md (see the dedicated section above — 41 new listings imported and unhidden in production, verified via anon-key REST reads; production went 257 → 298 listings, 1 hidden)
 - `6f47eed` — docs: record Batch 12 production transfer in CLAUDE.md (see the dedicated section above — transferred to production for intern review, not yet closed out; 100 rows staged, 2617 → 2517 remaining eligible)
 - `9ce59b2` — docs: record Batch 11 closeout and Batch 12 push in CLAUDE.md (see the dedicated sections above — 23 new listings imported and unhidden in production, verified via anon-key REST reads, production went 234 → 257 listings; Batch 12 pushed locally, not yet transferred to production)
