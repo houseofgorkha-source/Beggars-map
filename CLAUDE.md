@@ -452,6 +452,16 @@ Pushed and transferred to production 2026-09-18 (see the push/transfer record th
 - **The 29 rows that stayed unreviewed are now permanently marked `completed`** in the state file, same consequence as every prior partial-batch closeout — they won't resurface in a future `--push` without a deliberate state-file edit.
 - Final verified state: production **298 listings, 1 hidden** (unchanged pre-existing test row); local Discovery Workbench fully reconciled (0 in-progress, 1053 completed, 2517 remaining eligible for a future batch).
 
+## Discovery Workbench Batch 13 — pushed and transferred to production 2026-09-18, in progress
+
+Pushed immediately after Batch 12's closeout, in the same pass, matching the "pull, publish, purge, then push the next batch" cadence. Pre-checked both local (`--status`: 0 in-progress) and production (`discovery_batch_rows`: 0 rows, direct read-only query) before pushing — both genuinely clean, nothing to reconcile. Transferred to production immediately after (same session, on request).
+
+- **Local push**: `workbench-sync.mjs --push --batch-size=100` (explicit, per the Batch 6 lesson) — tool reports `"Pushed batch 13: 100 candidate(s), 0 photo(s) uploaded."`. Verified: 100 rows, 100 distinct place_ids, all `batch_id = '13'`; `workbench-state.json`'s 100 `in_progress` entries have zero overlap with the 1053 prior-`completed` place_ids; `nextBatch` advanced 13 → 14. Production confirmed untouched at this point (still 0 rows, listings still 298/1 hidden).
+- **Production transfer**: same one-off manual `supabase db query --linked` INSERT method every batch has used, built via a small throwaway Node script (written to a file rather than an inline `-e` string this time, after an inline attempt hit a shell backslash-escaping issue), production's exact 19-column schema re-verified fresh (local's extra `no_answer_count` column correctly excluded; `notes`/`dishes` confirmed as plain, non-generated columns), the standard `sqlString`/`chr(N)` escaping plus a `sqlJsonb()` helper for the `dishes` column.
+- **Verified**: production `discovery_batch_rows` now holds exactly **100 rows, 100 distinct `place_id`s, all `batch_id = '13'`, 0 reviewed** — byte-identical place_id set to local's own 100, spot-checked via a sorted diff (empty). Existing listings confirmed unchanged (298 total, 1 hidden) immediately before and after the transfer.
+- Local `workbench-state.json` reflects these 100 place_ids as `in_progress` — **2517 → 2417 remaining eligible** for a future batch.
+- **Not yet done, by definition of "in progress"**: pull, purge, verify-against-Excel, import, unhide — follow the same lifecycle once the intern has made real progress. Don't assume this batch is finished just because time has passed — check `discovery_batch_rows` directly first, same standing lesson every prior batch closeout has reinforced.
+
 ## The established Discovery Workbench batch lifecycle
 
 Production Workbench → Pull → verify Excel → purge Workbench → production import dry-run → import → verify → admin bulk unhide → final verification.
