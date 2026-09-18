@@ -340,6 +340,10 @@ Concise, factual snapshot of what is actually true right now — kept separate f
 
 **257 listings live in production, 1 hidden** (a pre-existing admin test row, "yoyo" — unchanged), confirmed directly via a fresh read-only query on 2026-09-18, after Discovery Workbench Batch 11's 23-listing import (see below). No unattributed drift was observed between Batch 10's close and Batch 11's import (production was re-checked at exactly 234 immediately before Batch 11's import began). Re-verify before treating any of these numbers as current.
 
+## WIP xlsx: "Number Valid = No Answer" count (as of 2026-09-18)
+
+**178 of the 3,586 total rows** in the local WIP xlsx (`tools/discovery/output/candidates-2026-09-01T11-50-51-056Z workonprogress.xlsx`) have `Number Valid = "No Answer"`, counted directly via `xlsx-to-json.py` against the real file (not the parked, never-shipped "No Answer counter" feature — see "Parked / uncommitted" below). This is a simple point-in-time snapshot, not a tracked/live metric anywhere in this repo; re-count directly from the xlsx if this number matters again later, since ongoing batch review keeps changing it.
+
 ## Discovery Workbench Batch 3 — completed and published
 
 Fully closed out, end to end:
