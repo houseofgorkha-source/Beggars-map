@@ -544,7 +544,76 @@ Pushed in the same pass as Batch 18's closeout, matching the "pull, publish, pur
 
 Production Workbench → Pull → verify Excel → purge Workbench → production import dry-run → import → verify → admin bulk unhide → final verification.
 
-This is the exact sequence both Batch 3 and Batch 4 followed end to end and is the one to follow for every future batch — see the Batch 4 section above for what "verify" means at each step (field-for-field Excel/photo checks before purge; dry-run review before import; count/audit/integrity checks before and after unhide).
+This is the exact sequence both Batch 3 and Batch 4 followed end to end and is the one to follow for every future batch — see the Batch 4 section above for what "verify" means at each step (field-for-field Excel/photo checks before purge; dry-run review before import; count/audit/integrity checks before and after unhide). **Updated 2026-09-30 — see "DISCOVERY ARCHIVE / SUPABASE-INDEPENDENT WORKFLOW" immediately below: this sequence now has one new hard gate inserted between "purge Workbench" and "production import dry-run" — a batch must be exported+verified into the local Discovery Archive before it may be purged, not just reviewed.**
+
+## DISCOVERY ARCHIVE / SUPABASE-INDEPENDENT WORKFLOW (added 2026-09-30)
+
+### Why this exists
+
+Supabase's `listing-photos` bucket reached ~913MB (843 objects, ~1.08MB/photo average, zero resizing anywhere in the pipeline) with the actual billing tier unverifiable from any available CLI tooling — no `supabase` subcommand exposes plan/quota. Until this pass, "purged from the Workbench" was effectively the only durable record a Discovery batch ever left behind, and that record was split across two separate, gitignored, local JSON files (`workbench-state.json` for place_id→batch_id, `excel-import-state.json` for place_id→listing_id) joinable only by `place_id`, with no formal verification step and no human-readable index. If Supabase ever became unusable, Discovery work would have had to stop outright, because "publish to Supabase" and "safely record this batch happened" had never been separated. **Supabase is now explicitly a *publishing destination*, not the Discovery archive.**
+
+### What already existed vs. what's new
+
+Nothing about the existing pipeline was rebuilt. `tools/discovery/photos/<place_id>/` was already a permanent, never-purged local photo archive (443+ folders) — left exactly as-is, not reorganized by batch, since photos are addressed by place_id everywhere in this codebase, never by batch. The WIP xlsx was already the permanent record of every candidate's review data — also left as-is. `tools/discovery/import-excel.mjs` — the sole production-write path — was **not modified at all**: it carries a real, deliberate `// explicitly off-limits to modify` comment (`workbench-sync.mjs:97`, referring to it), and the batch_id↔listing_id join it might have been asked to help close is already 100% computable externally (436 of 446 published place_ids join cleanly via `workbench-state.json`; the other 10 are legitimate pre-Workbench legacy imports from 2026-09-02, before Batch 1 even existed on 2026-09-05 — these show up in the ledger as `batch_id = "PRE-WORKBENCH"`, not an error).
+
+What's new is exactly two files, both purely local, both read-only with respect to Supabase (no `--linked`/`--production` flag exists in either, and none should ever be added — the entire point is that these must work with Supabase completely unreachable):
+- **`tools/discovery/build-master-ledger.mjs`** — the orchestrator. Flags: `--status`, `--export-batch=N`, `--export-all-completed`, `--verify-batch=N`, `--build-ledger`.
+- **`tools/discovery/build-archive-xlsx.py`** — a dumb renderer only (modeled directly on the existing `build-reverification-workbook.py` precedent), zero business logic.
+
+### Archive location and structure
+
+`tools/discovery/output/archive/` (gitignored, same as everything else in `output/`):
+```
+manifest.json                        resumability anchor — per-batch export/verify state, content-hashed
+MASTER_DISCOVERY_LEDGER.json          data of record — fully REGENERATED every run, never appended/hand-edited
+MASTER_DISCOVERY_LEDGER.xlsx          formatted view rendered from the .json
+batch-001/listings-export.xlsx        frozen, immutable per-batch snapshot
+...
+batch-018/listings-export.xlsx        (batch-019/ deliberately does not exist yet — still live, see below)
+```
+A new `Discovery Archive/` top-level tree was deliberately **not** created — it would have fragmented "where does this data live" into two competing answers alongside the existing `tools/discovery/output/`, which is already the established generated-artifacts location.
+
+### Master Discovery Ledger — one row per `place_id`
+
+Key columns (full list in `build-archive-xlsx.py`'s `MASTER_LEDGER_COLUMNS`): `place_id`, `name`, `batch_id`, `current_state`, `reviewed`, `approved`, `export_status`, `archived`/`archived_at`, `workbench_purged`, `listing_id`, `published`/`publication_date`, `photo_count_local`/`photo_count_published`, `photos_published`, `photos_archive_only`, `photos_archive_path`, `batch_export_path`, `known_hold`, `number_valid`/`menu_list_under_100`/`menu_details_notes`/`excel_row`, `notes`.
+
+**`export_status` and `workbench_purged` are separate flags, not rungs of `current_state`** — they can co-occur with several states (a row is purged the moment it's pulled, long before it's archived or published), so folding them in would force losing one fact to show another.
+
+**`current_state` — six rungs, evaluated top-down, first match wins:**
+1. `published` → **PUBLISHED** (a `listing_id` exists in `excel-import-state.json`'s production namespace — note this is orthogonal to a listing's `is_hidden` flag in Supabase; the two known held-back judgment-call duplicates from Batches 16/17 both correctly show `PUBLISHED` here, with the actual "why it's on hold" context carried in the separate `known_hold` column, not conflated with publish state)
+2. `archived ∧ approved ∧ ¬published` → **NOT_YET_PUBLISHED** (currently exactly 1 row: "Udupi Vaibhava, Veg Restaurant and Party Hall" from Batch 12 — the perpetual duplicate-risk row `import-excel.mjs`'s own dry-run has excluded on every single run since Batch 12)
+3. `archived ∧ ¬approved` → **ARCHIVED** (terminal — genuinely reviewed and rejected, or never got to `Yes`; legitimate, not a gap)
+4. `approved ∧ ¬archived` → **APPROVED**
+5. `reviewed` → **REVIEWED**
+6. else → **DISCOVERED**
+
+**Current ledger totals (first build, 2026-09-30): 3,586 place_ids — PUBLISHED 446, ARCHIVED 1,216, NOT_YET_PUBLISHED 1, DISCOVERED 1,923.** (APPROVED/REVIEWED show 0 right now because Batch 19's rows — the only ones that would occupy them today — are read from the *local* WIP xlsx, which hasn't been updated with the intern's live production edits yet; that only happens at `--pull`, which hasn't run for Batch 19 since it's still active. This is honest, not a bug: the ledger never fabricates a batch as further along than what's actually captured locally.)
+
+**PUBLISHED and ARCHIVED are never collapsed.** A batch can be 100% archived and 0% published — confirmed for real on Batch 6 (0 of its rows were ever reviewed at all, so 0 approved, so 0 published; it was purged within minutes of being pushed at the wrong batch size, exactly as this file's own Batch 6 section already documented).
+
+### A real correction made while building this — worth keeping
+
+The first version of `--verify-batch`'s check required every place_id in a batch to have real review data before the batch could be marked archived. Running it for real immediately failed on most historical batches — batch-by-batch, the exact same "N still blank" counts already documented in this file's own partial-batch closeout sections (e.g. Batch 17: 40 failures, matching its documented "40 still blank"; Batch 16: 27, matching its documented "27 blank"). **This was a bug in the check, not a real problem**: an intern-never-reached row has nothing to lose by archiving (per this project's own repeated, explicit "a blank cell purged loses nothing" policy) — it's correctly `DISCOVERED`/`workbench_purged=true` in the ledger, not a verification failure. Fixed to only flag genuine risks: a place_id with no xlsx row at all, or a row that's `approved` with zero local photos **and not already published** (an already-published zero-photo row — 5 real cases found, all imported between 2026-09-08 and 2026-09-22 — is pre-existing accepted history, not a new risk; Supabase's live row already is the permanent record for it).
+
+### The purge-safety rule (hard gate, not a suggestion)
+
+**A batch may only be purged from the Workbench after `--verify-batch=N` has set `archived_at` for it.** Before this pass, "reviewed" and "safely purgeable" were treated as the same moment; they no longer are.
+
+### Going-forward batch workflow (Batch 20 onward)
+
+Pull → write xlsx (verified) → download photos (verified) → **`build-master-ledger.mjs --export-batch=N` then `--verify-batch=N` — must reach `archived_at` before proceeding** → purge Workbench (now only reachable after that gate) → reconcile `workbench-state.json` → `import-excel.mjs` dry-run → review (duplicate-proximity checks, import-then-hold policy for probable duplicates, unchanged) → `--execute` → manual unhide → anon-key verify → **`--build-ledger`** (regenerate so it reflects the newly-published listing_ids/photo state) → push the next batch.
+
+### Resuming an archived-but-unpublished batch later
+
+Nothing special needed — a `NOT_YET_PUBLISHED` row just stays visible in the ledger indefinitely. Publishing it later is exactly the existing `import-excel.mjs --production` flow against the still-current WIP xlsx rows, same as any other row, no special-casing.
+
+### Current migration/archive status (as of 2026-09-30)
+
+- **Batches 1–18**: retroactively exported, verified, and archived (`archived_at` set for all 18); reflected in the first Master Discovery Ledger.
+- **Batch 19**: the active batch — pushed 2026-09-27, under live intern review as of this writing (confirmed directly: 100/100 rows have `Number Valid` set in production, 54/100 have `Menu List Under 100`, 21/100 have full dishes+photos). **Explicitly not touched, not exported, not archived, not purged by this pass** — it isn't in `workbench-state.json`'s `completed` bucket yet, so none of the new tooling can act on it until the intern finishes and it's pulled/closed out the normal way.
+- **Batch 20**: `nextBatch` in `workbench-state.json` — not yet pushed.
+- **Two production listings remain deliberately held hidden pending the owner's decision** (unchanged by this pass, both correctly showing `PUBLISHED` + a `known_hold` note in the ledger): the Vijayanagar "Rajanna Military Hotel" (Batch 16, `2f731614-a728-40ed-8fd8-371d6dd33ff4`) and "Lakshmi Balaji Tiffin Centre" (Batch 17, `3e117223-d191-4ad8-8050-846e1dfebbad`).
+- **For future agents**: before ever purging a future batch's `discovery_batch_rows`/`discovery-photos`, run `build-master-ledger.mjs --export-batch=N` then `--verify-batch=N` and confirm `archived_at` is actually set in `tools/discovery/output/archive/manifest.json` — do not purge on "the intern finished reviewing" alone. This work happened on branch `main` (the project's established pattern: `mobile/launch` → `main` → work → commit → push → back), not a new branching approach.
 
 ## Discovery Workbench — current workflow and safeguards
 
