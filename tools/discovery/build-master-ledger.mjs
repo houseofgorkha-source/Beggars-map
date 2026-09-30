@@ -211,9 +211,26 @@ function loadSources({ xlsxPath, stateFilePath, importStateFilePath, manifestPat
   return { rowsByPlaceId, workbenchState, importState, localEntries, prodEntries, manifest, batchIdsCompleted };
 }
 
+// Checks BOTH completed and in_progress. This is a deliberate, additive
+// change from this function's original completed-only design: the whole
+// point of the Discovery Archive is to let a batch be exported+verified
+// BEFORE it's purged from the Workbench, not only after (every prior batch
+// only ever got exported once it was already `completed`, because purging
+// was the only thing that ever moved a place_id there). A batch_id only
+// ever lives in one of the two buckets at a time in practice, so scanning
+// both is safe; --export-all-completed still only loops batchIdsCompleted
+// and so still never touches a live batch on its own. The ledger's own
+// `workbench_purged` flag is computed fresh from workbenchState at
+// --build-ledger time (see cmdBuildLedger), independent of the manifest —
+// so archiving an in_progress batch correctly keeps showing
+// workbench_purged=false for it until it's genuinely purged later; nothing
+// about this change makes the ledger lie about purge status.
 function placeIdsForBatch(workbenchState, batchId) {
   const ids = [];
   for (const [pid, entry] of Object.entries(workbenchState.completed || {})) {
+    if (String(entry.batch_id) === String(batchId)) ids.push(pid);
+  }
+  for (const [pid, entry] of Object.entries(workbenchState.in_progress || {})) {
     if (String(entry.batch_id) === String(batchId)) ids.push(pid);
   }
   return ids;
@@ -240,8 +257,7 @@ function cmdExportBatch(sources, batchId, { archiveDir, rendererPath }) {
   const { rowsByPlaceId, workbenchState, manifest } = sources;
   const placeIds = placeIdsForBatch(workbenchState, batchId);
   if (placeIds.length === 0) {
-    throw new Error(`Batch ${batchId} has no place_ids in workbench-state.json's "completed" bucket — nothing to export. ` +
-      `(If this batch is still in_progress, it is not exportable yet — that is by design.)`);
+    throw new Error(`Batch ${batchId} has no place_ids in workbench-state.json (checked both "completed" and "in_progress") — nothing to export.`);
   }
 
   const hash = contentHashFor(placeIds, rowsByPlaceId);
