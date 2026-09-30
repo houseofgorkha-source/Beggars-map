@@ -49,7 +49,11 @@
 //        row with zero local photos is flagged, a non-qualifying row is
 //        not — it never needed photos). Only sets archived_at in
 //        manifest.json on a fully clean pass; any failure halts and reports
-//        the exact place_id(s), changing nothing.
+//        the exact place_id(s), changing nothing. A blocked zero-photo,
+//        not-yet-published row can be explicitly accepted (confirmed real,
+//        not a download miss) via --accept-photo-gap=<place_id>,... — an
+//        allowlist naming exactly those place_id(s), never a blanket flag;
+//        the acceptance is recorded in that batch's own verify_notes.
 //   node tools/discovery/build-master-ledger.mjs --build-ledger
 //     -> regenerates (never appends to) MASTER_DISCOVERY_LEDGER.json and
 //        .xlsx from workbench-state.json + excel-import-state.json + the
@@ -339,13 +343,20 @@ function cmdExportAllCompleted(sources, opts) {
 //      UNPUBLISHED qualifying row with 0 photos is a genuine forward risk
 //      worth blocking on — if it's eventually imported, it could go live
 //      with a photo gap nobody previously noticed.
-function cmdVerifyBatch(sources, batchId) {
+// acceptPhotoGapPids: an explicit, per-place_id allowlist (never a blanket
+// bypass) for the one case cmdVerifyBatch would otherwise hard-block on —
+// an approved, unpublished, zero-local-photo row. Requires the caller to
+// name the exact place_id(s), so a future accidental `--verify-batch` can
+// never silently wave through a risk nobody actually looked at; the
+// acknowledgment is recorded in verify_notes for the same reason.
+function cmdVerifyBatch(sources, batchId, acceptPhotoGapPids = new Set()) {
   const { rowsByPlaceId, manifest, prodEntries } = sources;
   const m = manifest.batches[batchId];
   if (!m?.exported_at) throw new Error(`Batch ${batchId} has not been exported yet — run --export-batch=${batchId} first.`);
 
   const problems = [];
   const alreadyPublishedZeroPhoto = [];
+  const acceptedZeroPhoto = [];
   let neverReviewedCount = 0;
   for (const pid of m.place_ids) {
     const row = rowsByPlaceId.get(pid);
@@ -356,6 +367,8 @@ function cmdVerifyBatch(sources, batchId) {
       if (photoCount === 0) {
         if (prodEntries[pid]) {
           alreadyPublishedZeroPhoto.push(`${pid} (${row.name}): already published (${prodEntries[pid].imported_at}) with 0 photos — pre-existing, accepted, not a new risk`);
+        } else if (acceptPhotoGapPids.has(pid)) {
+          acceptedZeroPhoto.push(`${pid} (${row.name}): qualifies, has 0 local photos, NOT YET published — explicitly accepted via --accept-photo-gap, will import with no photo`);
         } else {
           problems.push(`${pid} (${row.name}): qualifies (Menu List Under 100=Yes), has 0 local photos, and is NOT YET published — real forward risk`);
         }
@@ -366,6 +379,7 @@ function cmdVerifyBatch(sources, batchId) {
   if (problems.length > 0) {
     console.error(`Batch ${batchId}: verification FAILED for ${problems.length} row(s) — archived_at NOT set. Nothing else changed.`);
     for (const p of problems) console.error(`  - ${p}`);
+    console.error(`If this gap is a real, known, accepted outcome (not a mistake), re-run with --accept-photo-gap=<place_id>[,<place_id>...] naming exactly these place_id(s).`);
     process.exitCode = 1;
     return;
   }
@@ -374,9 +388,9 @@ function cmdVerifyBatch(sources, batchId) {
   if (neverReviewedCount > 0) {
     verifyNotes.push(`${neverReviewedCount}/${m.place_ids.length} rows were never reviewed by the intern (permanently blank, per this project's established "a blank cell purged loses nothing" policy) — not a failure, informational only.`);
   }
-  verifyNotes.push(...alreadyPublishedZeroPhoto);
+  verifyNotes.push(...alreadyPublishedZeroPhoto, ...acceptedZeroPhoto);
   manifest.batches[batchId] = { ...m, archived_at: m.archived_at ?? new Date().toISOString(), verify_notes: verifyNotes };
-  console.log(`Batch ${batchId}: verified clean (${m.place_ids.length} place_ids, ${neverReviewedCount} never-reviewed) — archived_at set.`);
+  console.log(`Batch ${batchId}: verified clean (${m.place_ids.length} place_ids, ${neverReviewedCount} never-reviewed${acceptedZeroPhoto.length ? `, ${acceptedZeroPhoto.length} zero-photo gap(s) explicitly accepted` : ''}) — archived_at set.`);
 }
 
 // ---------------------------------------------------------- build-ledger
@@ -511,12 +525,15 @@ function main() {
       cmdExportAllCompleted(sources, { archiveDir, rendererPath });
       saveManifest(manifestPath, sources.manifest);
     } else if (args.values['verify-batch']) {
-      cmdVerifyBatch(sources, args.values['verify-batch']);
+      const acceptPhotoGapPids = new Set(
+        (args.values['accept-photo-gap'] ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+      );
+      cmdVerifyBatch(sources, args.values['verify-batch'], acceptPhotoGapPids);
       saveManifest(manifestPath, sources.manifest);
     } else if (args.flags.has('build-ledger')) {
       cmdBuildLedger(sources, { archiveDir, rendererPath });
     } else {
-      console.log('Usage: node build-master-ledger.mjs --status | --export-batch=N | --export-all-completed | --verify-batch=N | --build-ledger');
+      console.log('Usage: node build-master-ledger.mjs --status | --export-batch=N | --export-all-completed | --verify-batch=N [--accept-photo-gap=<place_id>,...] | --build-ledger');
       process.exitCode = 2;
     }
   } catch (err) {
