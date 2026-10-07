@@ -593,11 +593,22 @@ Pushed and transferred to production 2026-10-04 (see the push/transfer record th
 - **`--build-ledger`**: `ARCHIVED` 1,511 → 1,600 (+89 = 85 `No` + 4 blank), `NOT_YET_PUBLISHED` 106 → 117 (+11), `PUBLISHED` unchanged at 446, `DISCOVERED` 1,523 → 1,423.
 - **Deliberately not done**: no publish/import to `listings`, no unhide — `listings` stayed at 478 total / 3 hidden, `listing_photos` at 841.
 
-## Discovery Workbench Batch 24 — pushed and transferred to production 2026-10-06, in progress
+## Discovery Workbench Batch 24 — closed out 2026-10-07 (was left partially researched)
 
-- **Local push**: `workbench-sync.mjs --push --batch-size=100` — `"Pushed batch 24: 100 candidate(s), 0 photo(s) uploaded."` 100 rows, 100 distinct place_ids, all `batch_id = '24'`.
-- **Production transfer**: same one-off INSERT method (reused the Batch 21 build script unmodified), `db query --linked -f`. Verified: production holds **100 rows, 100 distinct place_ids, all `batch_id = '24'`, 0 reviewed**; name/address/phone/lat/lng byte-identical to local (0 diffs across 100 rows × 5 fields). `listings` unchanged at 478 / 3 hidden, `listing_photos` at 841.
-- **Deliberately not done**: no publish/import to `listings`, no unhide. Batch 24 is staged for the intern.
+Pushed and transferred to production 2026-10-06 (see the push/transfer record this section used to hold, now superseded below). Checked again 2026-10-07 before touching anything and found **76/100 reviewed**: 15 `Menu List Under 100 = Yes`, 61 `= No`, 24 still blank. Closed out per the standing "a blank cell purged loses nothing" policy. Run at the owner's request to "pull batch 24 and push batch 25 to workbench with new workflow."
+
+- **Pull**: all 100 production rows read directly (`db query --linked`, read-only) and written into the WIP xlsx via `write-updates-to-xlsx.py`; pre-checked all 100 place_ids existed and none already held a `Menu List Under 100` value; backed up to `output/backups/PRE-BATCH24-PULL-...bak.xlsx`. Verified 400/400 fields, 0 mismatches.
+- **Photos**: 29 objects across all 15 qualifying place_ids (no non-qualifying photos this time), downloaded one at a time to exact flat paths, all 29 byte-verified against `storage.objects` metadata.
+- **Archive gate**: `--export-batch=24` then `--verify-batch=24` passed clean on the first try (24 never-reviewed, 0 zero-photo-gap flags); `archived_at` set.
+- **Purge**: production `discovery-photos` 29 objects deleted by exact path (`buckets_deleted: []`, bucket re-listed empty); production `discovery_batch_rows` 100 → 0; local's stale batch-24 copy (all blank) deleted; `workbench-state.json` reconciled, 0 mismatches (2153 → 2253 completed).
+- **`--build-ledger`**: `ARCHIVED` 1,600 → 1,685 (+85 = 61 `No` + 24 blank), `NOT_YET_PUBLISHED` 117 → 132 (+15), `PUBLISHED` unchanged at 446, `DISCOVERED` 1,423 → 1,323.
+- **Deliberately not done**: no publish/import to `listings`, no unhide — `listings` stayed at 478 total / 3 hidden, `listing_photos` at 841.
+
+## Discovery Workbench Batch 25 — pushed and transferred to production 2026-10-07, in progress
+
+- **Local push**: `workbench-sync.mjs --push --batch-size=100` — `"Pushed batch 25: 100 candidate(s), 0 photo(s) uploaded."` 100 rows, 100 distinct place_ids, all `batch_id = '25'`.
+- **Production transfer**: same one-off INSERT method (reused the Batch 21 build script unmodified), `db query --linked -f`. Verified: production holds **100 rows, 100 distinct place_ids, all `batch_id = '25'`, 0 reviewed**; name/address/phone/lat/lng byte-identical to local (0 diffs across 100 rows × 5 fields). `listings` unchanged at 478 / 3 hidden, `listing_photos` at 841.
+- **Deliberately not done**: no publish/import to `listings`, no unhide. Batch 25 is staged for the intern.
 
 ## The established Discovery Workbench batch lifecycle
 
@@ -666,10 +677,10 @@ Pull → write xlsx (verified) → download photos (verified) → **`build-maste
 
 Nothing special needed — a `NOT_YET_PUBLISHED` row just stays visible in the ledger indefinitely. Publishing it later is exactly the existing `import-excel.mjs --production` flow against the still-current WIP xlsx rows, same as any other row, no special-casing.
 
-### Current migration/archive status (updated 2026-10-06, after Batch 23's closeout — see that section above for the full trail)
+### Current migration/archive status (updated 2026-10-07, after Batch 24's closeout — see that section above for the full trail)
 
-- **Batches 1–23**: all exported, verified, and archived (`archived_at` set for all 23; Batch 20 via `--accept-photo-gap`, Batches 21–23 clean on the first pass); current Master Discovery Ledger: `PUBLISHED` 446, `ARCHIVED` 1,600, `NOT_YET_PUBLISHED` 117, `DISCOVERED` 1,423.
-- **Batch 24**: the active batch — pushed and transferred 2026-10-06, 0/100 reviewed. Not yet exported/archived/purged.
+- **Batches 1–24**: all exported, verified, and archived (`archived_at` set for all 24; Batch 20 via `--accept-photo-gap`, Batches 21–24 clean on the first pass); current Master Discovery Ledger: `PUBLISHED` 446, `ARCHIVED` 1,685, `NOT_YET_PUBLISHED` 132, `DISCOVERED` 1,323.
+- **Batch 25**: the active batch — pushed and transferred 2026-10-07, 0/100 reviewed. Not yet exported/archived/purged.
 - **Two production listings remain deliberately held hidden pending the owner's decision** (unchanged by this pass, both correctly showing `PUBLISHED` + a `known_hold` note in the ledger): the Vijayanagar "Rajanna Military Hotel" (Batch 16, `2f731614-a728-40ed-8fd8-371d6dd33ff4`) and "Lakshmi Balaji Tiffin Centre" (Batch 17, `3e117223-d191-4ad8-8050-846e1dfebbad`).
 - **A non-qualifying row can still have photos in the bucket** (confirmed for real in Batch 22 — 2 of 32 photo-bearing place_ids were `No`/blank, not `Yes`) — this is normal, not a bucket hygiene problem; the download step always lists the bucket's actual contents rather than filtering to the Yes set first, so nothing is ever missed or left to purge unarchived.
 - **`build-master-ledger.mjs --verify-batch` now also accepts `--accept-photo-gap=<place_id>,...`** (added while closing out Batch 20 above) — an explicit, per-place_id allowlist for the one case the gate hard-blocks on (an approved, unpublished, zero-local-photo row), never a blanket bypass; the acknowledgment is recorded in the batch's own `verify_notes`. Use it only after confirming (as Batch 20's closeout did) that the zero-photo state is real and not a download miss.
@@ -705,6 +716,7 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- (this commit) — docs: close out Discovery Workbench Batch 24 and record Batch 25 push+transfer in CLAUDE.md (see the dedicated sections above — `listings` unchanged at 478/3 hidden; Batch 24's 15 qualifying rows sit `NOT_YET_PUBLISHED`; Batch 25 pushed and transferred)
 - (this commit) — docs: close out Discovery Workbench Batch 23 and record Batch 24 push+transfer in CLAUDE.md (see the dedicated sections above — `listings` unchanged at 478/3 hidden; Batch 23's 11 qualifying rows sit `NOT_YET_PUBLISHED`; Batch 24 pushed and transferred)
 - (this commit) — docs: close out Discovery Workbench Batch 22 (clean archive; found and confirmed harmless a non-qualifying row carrying bucket photos) and record Batch 23 push+transfer in CLAUDE.md (see the dedicated sections above — 0 listings imported this pass, `listings` unchanged at 478/3 hidden; Batch 22's 30 qualifying rows sit `NOT_YET_PUBLISHED`; Batch 23 pushed and transferred)
 - 6d3e983 — docs: close out Discovery Workbench Batch 21, push+transfer Batch 22
