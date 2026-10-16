@@ -219,7 +219,7 @@ describe('workbench-sync.mjs (Phase 2)', { skip: !stackReachable && 'local Supab
   test('push --batch-size=2 selects the first 2 eligible rows in order, uploads the one existing photo', async () => {
     const { status, stdout, stderr } = runScript(['--push', '--batch-size=2', ...commonArgs]);
     assert.equal(status, 0, stdout + stderr);
-    assert.match(stdout, /Pushed batch 1: 2 candidate\(s\), 1 photo\(s\) uploaded\./);
+    assert.match(stdout, /Pushed batch 1: 2 candidate\(s\) \(2 fresh, 0 resend\), 1 photo\(s\) uploaded\./);
 
     const row1 = await dbGet(PLACES[0]);
     const row2 = await dbGet(PLACES[1]);
@@ -439,7 +439,14 @@ describe('workbench-sync.mjs — Menu List Under 100 eligibility rule', { skip: 
   const eligArgs = [`--file=${ELIG_XLSX}`, `--state-file=${ELIG_STATE}`];
 
   function buildEligibilityFixture() {
-    const base = { formatted_address: 'addr', latitude: 12.9, longitude: 77.6, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: null, google_maps_uri: 'uri', discovery_sources: 'src', verification_status: 'unverified', verified_le_100: false, 'Menu Details/Notes': null };
+    // phone is deliberately non-null for every row here: this suite tests
+    // the "Menu List Under 100" blank-only eligibility rule specifically,
+    // and the phone-aware resend rule (see the dedicated describe blocks
+    // below) must not confound it — a null phone would make the two
+    // blank-eligible rows (ELIG_PLACES[0]/[5]) invisible to push()
+    // regardless of Menu List Under 100, which is not what this suite is
+    // testing.
+    const base = { formatted_address: 'addr', latitude: 12.9, longitude: 77.6, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, phone: '099000 09999', google_maps_uri: 'uri', discovery_sources: 'src', verification_status: 'unverified', verified_le_100: false, 'Menu Details/Notes': null };
     const rows = [
       // blank Menu List Under 100 + blank Number Valid -> eligible
       { ...base, place_id: ELIG_PLACES[0], name: 'Elig blank + NumberValid blank', 'Number Valid': null, 'Menu List Under 100': null },
@@ -550,5 +557,230 @@ wb.save(path)
     const { status, stdout, stderr } = runScript(['--pull', '--purge', ...eligArgs]);
     assert.equal(status, 0, stdout + stderr);
     assert.match(stdout, /Purged 2 row\(s\)\./);
+  });
+});
+
+// Dedicated, isolated suite for the phone-aware resend rule (added
+// 2026-10-16, owner's explicit instruction after Batch 30 turned out
+// 100% phone-less — see workbench-sync.mjs's own PHONE-AWARE RESEND RULE
+// comment above isResendEligible). Own fixture/state files, same
+// isolation convention as the eligibility suite above.
+describe('workbench-sync.mjs — phone-aware resend rule: fresh-before-resend priority', { skip: !stackReachable && 'local Supabase stack not reachable at 127.0.0.1:54321' }, () => {
+  const XLSX = join(OUTPUT_DIR, 'test-fixture-resend-priority.xlsx');
+  const STATE = join(OUTPUT_DIR, 'test-state-resend-priority.json');
+  const P = ['RESEND-PRI-1-nophone', 'RESEND-PRI-2-fresh', 'RESEND-PRI-3-resend-eligible'];
+  const args = [`--file=${XLSX}`, `--state-file=${STATE}`];
+
+  function buildFixture() {
+    const base = { formatted_address: 'addr', latitude: 12.9, longitude: 77.6, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, google_maps_uri: 'uri', discovery_sources: 'src', verification_status: 'unverified', verified_le_100: false, 'Menu Details/Notes': null };
+    const rows = [
+      // No phone at all, never touched — must never be selected, fresh or resend.
+      { ...base, place_id: P[0], name: 'No phone, untouched', phone: null, 'Number Valid': null, 'Menu List Under 100': null },
+      // Phone, never touched — the genuine fresh candidate.
+      { ...base, place_id: P[1], name: 'Fresh with phone', phone: '099000 00101', 'Number Valid': null, 'Menu List Under 100': null },
+      // Phone, already in state.completed (seeded below), "No Answer" —
+      // resend-eligible, but must lose to the fresh candidate above when
+      // batch size only allows one.
+      { ...base, place_id: P[2], name: 'Already-sent, no answer', phone: '099000 00102', 'Number Valid': 'No Answer', 'Menu List Under 100': null },
+    ];
+    const headers = Object.keys(rows[0]);
+    const pyPath = join(OUTPUT_DIR, '.build-resend-priority-fixture.py');
+    const script = `
+import json, sys
+import openpyxl
+headers = json.loads(sys.argv[1])
+rows = json.loads(sys.argv[2])
+path = sys.argv[3]
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.append(headers)
+for row in rows:
+    ws.append([row.get(h) for h in headers])
+wb.save(path)
+`;
+    mkdirSync(OUTPUT_DIR, { recursive: true });
+    writeFileSync(pyPath, script, 'utf8');
+    const result = spawnSync('python', [pyPath, JSON.stringify(headers), JSON.stringify(rows), XLSX], { encoding: 'utf8' });
+    unlinkSync(pyPath);
+    if (result.status !== 0) throw new Error(`Could not build resend-priority fixture: ${result.stderr || result.stdout}`);
+  }
+
+  function cleanupArtifacts() {
+    for (const f of [XLSX, STATE]) if (existsSync(f)) rmSync(f, { force: true });
+    if (existsSync(BACKUPS_DIR)) {
+      for (const f of readdirSync(BACKUPS_DIR)) {
+        if (f.startsWith('test-fixture-resend-priority.xlsx')) rmSync(join(BACKUPS_DIR, f), { force: true });
+      }
+    }
+  }
+
+  async function cleanupDb() {
+    for (const placeId of P) await dbDeleteHard(placeId);
+  }
+
+  before(async () => {
+    cleanupArtifacts();
+    await cleanupDb();
+    buildFixture();
+    // Seed P[2] as already-completed (sent once before, no answer) —
+    // never created via a real push/pull/purge cycle here since the point
+    // of this test is purely the selection/ordering decision, not the
+    // round-trip itself (that's covered by the other describe block).
+    writeFileSync(
+      STATE,
+      JSON.stringify(
+        {
+          completed: { [P[2]]: { name: 'Already-sent, no answer', batch_id: '0', completed_at: '2026-01-01T00:00:00.000Z', times_sent: 1 } },
+          in_progress: {},
+          nextBatch: 1,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+  });
+
+  after(async () => {
+    cleanupArtifacts();
+    await cleanupDb();
+  });
+
+  test('push --batch-size=1 picks the fresh phone candidate over the resend-eligible one, and never considers the phone-less row', async () => {
+    const { status, stdout, stderr } = runScript(['--push', '--batch-size=1', ...args]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Pushed batch 1: 1 candidate\(s\) \(1 fresh, 0 resend\)/);
+
+    assert.ok(await dbGet(P[1]), 'the fresh phone candidate should have been pushed');
+    assert.equal(await dbGet(P[0]), null, 'the phone-less row must never be pushed');
+    assert.equal(await dbGet(P[2]), null, 'the resend-eligible row must lose to the fresh candidate when batch size is 1');
+  });
+
+  test('cleanup: purge the one-row batch', async () => {
+    const { status, stdout, stderr } = runScript(['--pull', '--purge', ...args]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Purged 1 row\(s\)\./);
+  });
+});
+
+describe('workbench-sync.mjs — phone-aware resend rule: pool filtering, blanking, and times_sent', { skip: !stackReachable && 'local Supabase stack not reachable at 127.0.0.1:54321' }, () => {
+  const XLSX = join(OUTPUT_DIR, 'test-fixture-resend-pool.xlsx');
+  const STATE = join(OUTPUT_DIR, 'test-state-resend-pool.json');
+  // R1: "No Answer"/blank -> resend-eligible.
+  // R2: Menu List Under 100 = "No" -> Rule 1, never resend.
+  // R3: Number Valid = "No" -> Rule 2, never resend.
+  // R4: Number Valid = "Yes", Menu List Under 100 blank (qualification
+  //     simply never recorded) -> resend-eligible per the owner's explicit
+  //     decision to include this bucket.
+  // R5: "No Answer"/blank but already at the resend cap (times_sent=3) ->
+  //     excluded, must not be pushed again.
+  const P = ['RESEND-POOL-R1', 'RESEND-POOL-R2', 'RESEND-POOL-R3', 'RESEND-POOL-R4', 'RESEND-POOL-R5'];
+  const args = [`--file=${XLSX}`, `--state-file=${STATE}`];
+
+  function buildFixture() {
+    const base = { formatted_address: 'addr', latitude: 12.9, longitude: 77.6, primary_type: 'restaurant', business_status: 'OPERATIONAL', google_price_level: 'PRICE_LEVEL_INEXPENSIVE', website_uri: null, google_maps_uri: 'uri', discovery_sources: 'src', verification_status: 'unverified', verified_le_100: false, 'Menu Details/Notes': null };
+    const rows = [
+      { ...base, place_id: P[0], name: 'Resend eligible (no answer)', phone: '099000 00201', 'Number Valid': 'No Answer', 'Menu List Under 100': null },
+      { ...base, place_id: P[1], name: 'Rule 1 excluded (qualify=No)', phone: '099000 00202', 'Number Valid': 'No Answer', 'Menu List Under 100': 'No' },
+      { ...base, place_id: P[2], name: 'Rule 2 excluded (number=No)', phone: '099000 00203', 'Number Valid': 'No', 'Menu List Under 100': null },
+      { ...base, place_id: P[3], name: 'Resend eligible (valid number, qualify never recorded)', phone: '099000 00204', 'Number Valid': 'Yes', 'Menu List Under 100': null },
+      { ...base, place_id: P[4], name: 'At resend cap', phone: '099000 00205', 'Number Valid': 'No Answer', 'Menu List Under 100': null },
+    ];
+    const headers = Object.keys(rows[0]);
+    const pyPath = join(OUTPUT_DIR, '.build-resend-pool-fixture.py');
+    const script = `
+import json, sys
+import openpyxl
+headers = json.loads(sys.argv[1])
+rows = json.loads(sys.argv[2])
+path = sys.argv[3]
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.append(headers)
+for row in rows:
+    ws.append([row.get(h) for h in headers])
+wb.save(path)
+`;
+    mkdirSync(OUTPUT_DIR, { recursive: true });
+    writeFileSync(pyPath, script, 'utf8');
+    const result = spawnSync('python', [pyPath, JSON.stringify(headers), JSON.stringify(rows), XLSX], { encoding: 'utf8' });
+    unlinkSync(pyPath);
+    if (result.status !== 0) throw new Error(`Could not build resend-pool fixture: ${result.stderr || result.stdout}`);
+  }
+
+  function cleanupArtifacts() {
+    for (const f of [XLSX, STATE]) if (existsSync(f)) rmSync(f, { force: true });
+    if (existsSync(BACKUPS_DIR)) {
+      for (const f of readdirSync(BACKUPS_DIR)) {
+        if (f.startsWith('test-fixture-resend-pool.xlsx')) rmSync(join(BACKUPS_DIR, f), { force: true });
+      }
+    }
+  }
+
+  async function cleanupDb() {
+    for (const placeId of P) await dbDeleteHard(placeId);
+  }
+
+  function seedState() {
+    const completed = {};
+    for (const [i, placeId] of P.entries()) {
+      completed[placeId] = {
+        name: `Seed ${i}`,
+        batch_id: '0',
+        completed_at: '2026-01-01T00:00:00.000Z',
+        times_sent: placeId === P[4] ? 3 : 1,
+      };
+    }
+    writeFileSync(STATE, JSON.stringify({ completed, in_progress: {}, nextBatch: 1 }, null, 2), 'utf8');
+  }
+
+  before(async () => {
+    cleanupArtifacts();
+    await cleanupDb();
+    buildFixture();
+    seedState();
+  });
+
+  after(async () => {
+    cleanupArtifacts();
+    await cleanupDb();
+  });
+
+  test('push selects only the resend-eligible rows (R1, R4), excludes Rule 1/Rule 2/cap rows, and blanks their stale Number Valid/Menu List Under 100 on the live row', async () => {
+    const { status, stdout, stderr } = runScript(['--push', '--batch-size=10', ...args]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Pushed batch 1: 2 candidate\(s\) \(0 fresh, 2 resend\)/);
+
+    const r1 = await dbGet(P[0]);
+    const r4 = await dbGet(P[3]);
+    assert.ok(r1, 'R1 (No Answer, unresolved) must be resend-eligible');
+    assert.ok(r4, 'R4 (Yes + qualification never recorded) must be resend-eligible per the owner\'s decision');
+    assert.equal(r1.number_valid, null, 'the stale "No Answer" must be blanked on the fresh push, not carried forward');
+    assert.equal(r1.menu_list_under_100, null);
+    assert.equal(r4.number_valid, null, 'the stale "Yes" must also be blanked — the row starts clean regardless of its prior value');
+    assert.equal(r4.menu_list_under_100, null);
+
+    assert.equal(await dbGet(P[1]), null, 'Rule 1 (Menu List Under 100=No) must never be resent');
+    assert.equal(await dbGet(P[2]), null, 'Rule 2 (Number Valid=No) must never be resent');
+    assert.equal(await dbGet(P[4]), null, 'a row already at the resend cap (times_sent=3) must never be resent again');
+
+    const state = readFileSync(STATE, 'utf8');
+    const parsed = JSON.parse(state);
+    assert.equal(parsed.in_progress[P[0]].times_sent, 2, 'times_sent increments from 1 to 2 on resend');
+    assert.equal(parsed.in_progress[P[3]].times_sent, 2);
+  });
+
+  test('pull --purge carries times_sent through unchanged into the completed entry', async () => {
+    const { status, stdout, stderr } = runScript(['--pull', '--purge', ...args]);
+    assert.equal(status, 0, stdout + stderr);
+    assert.match(stdout, /Purged 2 row\(s\)\./);
+
+    const state = JSON.parse(readFileSync(STATE, 'utf8'));
+    assert.equal(state.completed[P[0]].times_sent, 2, 'times_sent carried through from in_progress, not reset');
+    assert.equal(state.completed[P[3]].times_sent, 2);
+    // Never touched by this cycle — their original seeded entries stand.
+    assert.equal(state.completed[P[1]].times_sent, 1);
+    assert.equal(state.completed[P[2]].times_sent, 1);
+    assert.equal(state.completed[P[4]].times_sent, 3);
   });
 });

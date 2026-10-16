@@ -42,9 +42,12 @@
 //
 // ==================== RESUMABLE / IDEMPOTENT ===========================
 // State file (tools/discovery/output/workbench-state.json):
-//   { completed: { [place_id]: { name, batch_id, completed_at } },
-//     in_progress: { [place_id]: { name, batch_id, pushed_at } },
+//   { completed: { [place_id]: { name, batch_id, completed_at, times_sent? } },
+//     in_progress: { [place_id]: { name, batch_id, pushed_at, times_sent? } },
 //     nextBatch: <int> }
+// times_sent is new (added for the phone-resend rule below) and absent on
+// every entry created before this feature — treat a missing value as 1
+// wherever it's read (`?? 1`), never back-filled in bulk.
 //
 // Before every command that touches Supabase, the live discovery_batch_rows
 // table is re-read and reconciled against this state file (never trusted
@@ -64,6 +67,35 @@
 // part in this decision. A row the old manual-Excel process already marked
 // "No"/"Yes" is therefore never selected for push, even if this tool has
 // never seen it before.
+//
+// PHONE-AWARE RESEND RULE (added 2026-10-16, owner's explicit instruction
+// after Batch 30 turned out 100% phone-less): the discovery dataset has a
+// hard, verified cutoff — every candidate that ever had a phone number on
+// file with Google has already been pushed through a batch at least once;
+// every remaining untouched candidate has none. Pushing a phone-less
+// candidate (fresh or otherwise) is now permanently disallowed
+// (isEligibleForResearch's blank-only pool additionally requires `r.phone`
+// in push() below). Once that fresh/phone pool is empty, push() backfills
+// from a RESEND pool — phone-bearing candidates already in `completed`
+// that never reached a firm answer — via isResendEligible(), subject to
+// two permanent exclusions the owner specified:
+//   Rule 1: Menu List Under 100 === "No"  -> never resend (already a
+//           known dead end, not re-litigated here).
+//   Rule 2: Number Valid === "No"         -> never resend (the number
+//           itself is wrong/invalid, calling again changes nothing).
+// A row already Menu List Under 100 === "Yes" is excluded too (nothing
+// left to learn). Everything else with a phone — "No Answer", never
+// reached a conclusion at all, or "Yes" with the qualification itself
+// never recorded — is resend-eligible. Each resend increments a
+// `times_sent` counter on the state entry; a candidate stops being
+// resend-eligible once times_sent would reach 4 (i.e. capped at 3 total
+// sends) so an unreachable business doesn't recycle forever. On resend,
+// the pushed row's Number Valid/Menu List Under 100 start blank (not the
+// stale prior answer) — see push()'s SQL-value-building loop — so the
+// live "X/Y reviewed" counter for that batch reflects actual new work,
+// not a stale answer the intern never touched this round. The WIP xlsx's
+// own historical cell is untouched by this; only the next --pull
+// overwrites it with the new attempt's real result.
 //
 // Purge order is deliberately photos-then-rows, per place_id, not one bulk
 // step: if photo cleanup for a place_id fails partway, that place_id simply
@@ -397,6 +429,21 @@ function isEligibleForResearch(row) {
   return qualifies === '';
 }
 
+// Resend-eligibility gate — see the PHONE-AWARE RESEND RULE comment above.
+// Only ever consulted against rows already in state.completed; never
+// against the normal fresh pool.
+const RESEND_CAP = 3;
+
+function isResendEligible(row) {
+  if (!row.phone) return false;
+  const qualifies = typeof row[QUALIFY_COLUMN] === 'string' ? row[QUALIFY_COLUMN].trim() : '';
+  const numberValid = typeof row[NUMBER_VALID_COLUMN] === 'string' ? row[NUMBER_VALID_COLUMN].trim() : '';
+  if (qualifies === 'No') return false; // Rule 1
+  if (numberValid === 'No') return false; // Rule 2
+  if (qualifies === 'Yes') return false; // already fully resolved, nothing to gain
+  return true;
+}
+
 function isReviewedDbRow(row) {
   if (!row.number_valid) return false;
   if (row.menu_list_under_100 !== 'Yes' && row.menu_list_under_100 !== 'No') return false;
@@ -429,13 +476,47 @@ async function push(xlsxPath, stateFilePath, batchSize) {
   }
 
   const rows = readWorkbook(xlsxPath);
-  const pool = rows.filter(
-    (r) => typeof r.place_id === 'string' && r.place_id.trim() && !state.completed[r.place_id] && isEligibleForResearch(r)
+  const freshPool = rows.filter(
+    (r) =>
+      typeof r.place_id === 'string' &&
+      r.place_id.trim() &&
+      !state.completed[r.place_id] &&
+      isEligibleForResearch(r) &&
+      !!r.phone
   );
-  const selected = pool.slice(0, batchSize);
+
+  // Resend pool: only ever sourced from state.completed (never from the
+  // fresh-pool rows above), excludes anything currently in_progress (can't
+  // happen in practice since push() already refused above when
+  // activeCount > 0, but checked explicitly for safety/clarity) and
+  // anything at the resend cap. Sorted fewest-times-sent-first, then
+  // oldest-completed-first, so retries rotate fairly rather than
+  // repeatedly re-picking the same handful.
+  const resendPool = rows
+    .filter(
+      (r) =>
+        typeof r.place_id === 'string' &&
+        r.place_id.trim() &&
+        state.completed[r.place_id] &&
+        !state.in_progress[r.place_id] &&
+        isResendEligible(r)
+    )
+    .filter((r) => (state.completed[r.place_id].times_sent ?? 1) < RESEND_CAP)
+    .sort((a, b) => {
+      const ta = state.completed[a.place_id].times_sent ?? 1;
+      const tb = state.completed[b.place_id].times_sent ?? 1;
+      if (ta !== tb) return ta - tb;
+      const ca = state.completed[a.place_id].completed_at ?? '';
+      const cb = state.completed[b.place_id].completed_at ?? '';
+      return ca < cb ? -1 : ca > cb ? 1 : 0;
+    });
+
+  const selected = [...freshPool, ...resendPool].slice(0, batchSize);
+  const freshSelectedCount = selected.filter((r) => freshPool.includes(r)).length;
+  const resendSelectedCount = selected.length - freshSelectedCount;
 
   if (selected.length === 0) {
-    console.log('Nothing to push — every candidate is already reviewed or completed.');
+    console.log('Nothing to push — every candidate is already reviewed, completed, phone-less, or at the resend cap.');
     return;
   }
 
@@ -450,12 +531,18 @@ async function push(xlsxPath, stateFilePath, batchSize) {
   let skippedInvalidEnum = 0;
   const valuesSql = selected
     .map((r) => {
-      let numberValid = typeof r[NUMBER_VALID_COLUMN] === 'string' ? r[NUMBER_VALID_COLUMN].trim() : '';
+      // A resend row still carries its stale prior answer in the xlsx
+      // (untouched since its last --pull) — start it blank in the pushed
+      // row instead, so this batch's "X/Y reviewed" count reflects real
+      // new work, not a historical answer the intern never touched this
+      // round. See the PHONE-AWARE RESEND RULE comment above.
+      const isResend = !!state.completed[r.place_id];
+      let numberValid = isResend ? '' : typeof r[NUMBER_VALID_COLUMN] === 'string' ? r[NUMBER_VALID_COLUMN].trim() : '';
       if (numberValid && !VALID_NUMBER_VALID.includes(numberValid)) {
         skippedInvalidEnum += 1;
         numberValid = '';
       }
-      let qualifies = typeof r[QUALIFY_COLUMN] === 'string' ? r[QUALIFY_COLUMN].trim() : '';
+      let qualifies = isResend ? '' : typeof r[QUALIFY_COLUMN] === 'string' ? r[QUALIFY_COLUMN].trim() : '';
       if (qualifies && !VALID_QUALIFY.includes(qualifies)) {
         skippedInvalidEnum += 1;
         qualifies = '';
@@ -501,13 +588,15 @@ async function push(xlsxPath, stateFilePath, batchSize) {
   }
 
   for (const r of selected) {
-    state.in_progress[r.place_id] = { name: r.name, batch_id: batchId, pushed_at: pushedAt };
+    const isResend = !!state.completed[r.place_id];
+    const timesSent = isResend ? (state.completed[r.place_id].times_sent ?? 1) + 1 : 1;
+    state.in_progress[r.place_id] = { name: r.name, batch_id: batchId, pushed_at: pushedAt, times_sent: timesSent };
   }
   state.nextBatch = batchNumber + 1;
   saveState(stateFilePath, state);
 
   console.log(
-    `Pushed batch ${batchId}: ${selected.length} candidate(s), ${photosUploaded} photo(s) uploaded` +
+    `Pushed batch ${batchId}: ${selected.length} candidate(s) (${freshSelectedCount} fresh, ${resendSelectedCount} resend), ${photosUploaded} photo(s) uploaded` +
       (photoFailures ? `, ${photoFailures} photo failure(s)` : '') +
       (skippedInvalidEnum ? `, ${skippedInvalidEnum} legacy value(s) with an invalid dropdown option were reset to blank` : '') +
       '.'
@@ -612,7 +701,11 @@ async function pull(xlsxPath, stateFilePath, purge) {
     runSql(`delete from discovery_batch_rows where place_id in (${placeIdList});`);
     const completedAt = new Date().toISOString();
     for (const r of succeeded) {
-      state.completed[r.place_id] = { name: r.name, batch_id: r.batch_id, completed_at: completedAt };
+      // times_sent is tracked on the in_progress entry at push time (fresh
+      // = 1, resend = previous + 1) — carried through unchanged here, not
+      // recomputed, since `r` itself (a live DB row) never had this field.
+      const timesSent = state.in_progress[r.place_id]?.times_sent ?? 1;
+      state.completed[r.place_id] = { name: r.name, batch_id: r.batch_id, completed_at: completedAt, times_sent: timesSent };
       delete state.in_progress[r.place_id];
     }
     saveState(stateFilePath, state);
@@ -659,6 +752,25 @@ function status(xlsxPath, stateFilePath) {
   const remainingEligible = rows.filter(
     (r) => isEligibleForResearch(r) && !state.in_progress[r.place_id] && !state.completed[r.place_id]
   ).length;
+  // Phone-aware figures (see the PHONE-AWARE RESEND RULE comment above
+  // isResendEligible) — additive, don't redefine remainingEligible/
+  // eligibleBlank above, since past batch-closeout records already quote
+  // those numbers under their original meaning.
+  const remainingEligibleWithPhone = rows.filter(
+    (r) => isEligibleForResearch(r) && !state.in_progress[r.place_id] && !state.completed[r.place_id] && !!r.phone
+  ).length;
+  const resendPoolRows = rows.filter(
+    (r) =>
+      typeof r.place_id === 'string' &&
+      r.place_id.trim() &&
+      state.completed[r.place_id] &&
+      !state.in_progress[r.place_id] &&
+      isResendEligible(r)
+  );
+  const resendEligibleUnderCap = resendPoolRows.filter((r) => (state.completed[r.place_id].times_sent ?? 1) < RESEND_CAP);
+  const resendAtCap = resendPoolRows.length - resendEligibleUnderCap.length;
+  const sentOnce = resendEligibleUnderCap.filter((r) => (state.completed[r.place_id].times_sent ?? 1) === 1).length;
+  const sentTwice = resendEligibleUnderCap.filter((r) => (state.completed[r.place_id].times_sent ?? 1) === 2).length;
 
   console.log(`State file                          : ${stateFilePath}`);
   console.log(`Spreadsheet                         : ${xlsxPath}`);
@@ -669,6 +781,8 @@ function status(xlsxPath, stateFilePath) {
   console.log(`In progress (active batch)           : ${inProgressCount}`);
   console.log(`Completed (pulled + purged)          : ${completedCount}`);
   console.log(`Remaining eligible (blank, not yet pushed/completed) : ${remainingEligible}`);
+  console.log(`  of which have a phone number        : ${remainingEligibleWithPhone}`);
+  console.log(`Resend-eligible (previously sent, phone, unresolved) : ${resendEligibleUnderCap.length} (sent once: ${sentOnce}, sent twice: ${sentTwice}; ${resendAtCap} at the ${RESEND_CAP}-send cap, excluded)`);
 
   if (inProgressCount > 0) {
     const batchIds = [...new Set(Object.values(state.in_progress).map((e) => e.batch_id))];
