@@ -680,13 +680,25 @@ Pushed and transferred to production 2026-10-15 under the **old** (pre-fix) code
 - **`--build-ledger`**: `ARCHIVED` 2,055 → 2,155 (+100 = 98 never-reviewed + 2 `No`), `NOT_YET_PUBLISHED` unchanged at 262 (0 `Yes` rows), `PUBLISHED` unchanged at 446, `DISCOVERED` 823 → 723.
 - **Deliberately not done**: no publish/import to `listings`, no unhide — `listings` stayed at 478 total / 3 hidden, `listing_photos` at 841.
 
-## Discovery Workbench Batch 31 — pushed and transferred to production 2026-10-16, in progress (first batch under the new resend rule)
+## Discovery Workbench Batch 31 — closed out 2026-10-18 (first resend batch's results pulled)
 
-Pushed immediately after Batch 30's purge freed the one-active-batch slot — the **first real-world demonstration** of the phone-aware resend rule, since the fresh pool is 0.
+Pushed and transferred to production 2026-10-16 (see the push/transfer record this section used to hold, now superseded below). Checked again 2026-10-18 and found **76/100 reached a conclusion**: 23 rows `Menu List Under 100 = Yes`, 53 `= No`, 24 still blank — and critically, `Number Valid` was set on all 100/100, confirming every row genuinely had a phone to call this time. Closed out per the standing "a blank cell purged loses nothing" policy.
 
-- **Local push**: `workbench-sync.mjs --push --batch-size=100` — `"Pushed batch 31: 100 candidate(s) (0 fresh, 100 resend), 0 photo(s) uploaded."` Confirmed directly: all 100 rows have a phone number, and both `number_valid`/`menu_list_under_100` are `null` on every row despite each place_id's xlsx cell still holding its stale prior answer (e.g. "No Answer") — the blanking-on-resend behavior working correctly end to end, not just in the unit tests. `workbench-state.json`'s `in_progress` entries for all 100 correctly show `times_sent: 2` (each was sent once before).
-- **Production transfer**: same one-off INSERT method, `db query --linked -f`. Verified: production holds **100 rows, 100 distinct place_ids, all `batch_id = '31'`, 0 reviewed, 0 without a phone**; name/address/phone/lat/lng byte-identical to local (0 diffs across 100 rows × 5 fields). `listings` unchanged at 478 / 3 hidden, `listing_photos` at 841.
-- **Deliberately not done**: no publish/import to `listings`, no unhide. Batch 31 is staged for the intern — this time, every single row has a real phone number to call.
+- **Pull**: all 100 production rows read directly and written into the WIP xlsx via `write-updates-to-xlsx.py`, overwriting each row's stale prior answer (the whole premise of a resend batch) — verified field-for-field, 400/400 values matched, 0 mismatches.
+- **Photos**: 30 objects across 22 place_ids. One of the 23 qualifying rows ("cheese pav bhaji ₹90, classic pav bhaji ₹55", `ChIJPTK_2wk9rjsRlf2iP1ql21A`) genuinely had 0 photos — confirmed real, not yet published. Same pattern already explicitly approved during Batch 20's closeout, applied directly via `--accept-photo-gap` without re-asking. All 30 real photos downloaded and byte-verified.
+- **Archive gate**: `--export-batch=31` then `--verify-batch=31 --accept-photo-gap=ChIJPTK_2wk9rjsRlf2iP1ql21A` — verified clean (24 never-reviewed, 1 zero-photo gap explicitly accepted); `archived_at` set.
+- **Purge**: production `discovery-photos` 30 objects deleted by exact path, bucket confirmed still present. Production `discovery_batch_rows`: 100 → 0. Local's stale batch-31 copy (all blank) deleted. `workbench-state.json` reconciled, 0 mismatches — **`times_sent` correctly carried through as `2` for all 100 rows** (confirmed directly), not reset or lost on this second cycle.
+- **`--build-ledger`**: a genuinely new kind of movement this time — `ARCHIVED` 2,155 → 2,132 (**net decrease** of 23, not an increase: the 23 newly-`Yes` rows graduated out of `ARCHIVED` into `NOT_YET_PUBLISHED`, since the ledger re-derives each row's state from its *current* xlsx value, not a frozen history), `NOT_YET_PUBLISHED` 262 → 285 (+23), `PUBLISHED` unchanged at 446, `DISCOVERED` unchanged at 723 (none of these rows were ever in that bucket, by definition of being resend candidates).
+- **Resend pool after this round**: 796 (777 still sent-once/untouched, 19 sent-twice/still-unresolved — the other 5 of the 24 still-blank rows picked up `Number Valid = "No"` this round, correctly Rule-2-excluded going forward even though their qualification itself stayed blank).
+- **Deliberately not done**: no publish/import to `listings`, no unhide — `listings` stayed at 478 total / 3 hidden, `listing_photos` at 841.
+
+## Discovery Workbench Batch 32 — pushed and transferred to production 2026-10-18, in progress (second resend batch)
+
+Pushed immediately after Batch 31's purge freed the one-active-batch slot — again entirely resend candidates, since the fresh/phone pool remains 0.
+
+- **Local push**: `workbench-sync.mjs --push --batch-size=100` — `"Pushed batch 32: 100 candidate(s) (0 fresh, 100 resend), 0 photo(s) uploaded."` Confirmed directly: all 100 rows have a phone number, `number_valid`/`menu_list_under_100` both `null` on every row (blanked despite the xlsx's stale cell).
+- **Production transfer**: same one-off INSERT method, `db query --linked -f`. Verified: production holds **100 rows, 100 distinct place_ids, all `batch_id = '32'`, 0 reviewed, 0 without a phone**; name/address/phone/lat/lng byte-identical to local (0 diffs across 100 rows × 5 fields). `listings` unchanged at 478 / 3 hidden, `listing_photos` at 841.
+- **Deliberately not done**: no publish/import to `listings`, no unhide. Batch 32 is staged for the intern.
 
 ## The established Discovery Workbench batch lifecycle
 
@@ -755,10 +767,10 @@ Pull → write xlsx (verified) → download photos (verified) → **`build-maste
 
 Nothing special needed — a `NOT_YET_PUBLISHED` row just stays visible in the ledger indefinitely. Publishing it later is exactly the existing `import-excel.mjs --production` flow against the still-current WIP xlsx rows, same as any other row, no special-casing.
 
-### Current migration/archive status (updated 2026-10-16, after Batch 30's closeout and the phone-aware resend rule — see the dedicated sections above for the full trail)
+### Current migration/archive status (updated 2026-10-18, after Batch 31's closeout — see that section above for the full trail)
 
-- **Batches 1–30**: all exported, verified, and archived (`archived_at` set for all 30; Batches 20 and 28 via `--accept-photo-gap`, the rest clean on the first pass); current Master Discovery Ledger: `PUBLISHED` 446, `ARCHIVED` 2,155, `NOT_YET_PUBLISHED` 262, `DISCOVERED` 723.
-- **Batch 31**: the active batch — pushed and transferred 2026-10-16, 0/100 reviewed, 0/100 without a phone. The **first batch composed entirely of resend candidates** (100 resend, 0 fresh) — see the phone-aware resend rule section above.
+- **Batches 1–31**: all exported, verified, and archived (`archived_at` set for all 31; Batches 20/28/31 via `--accept-photo-gap`, the rest clean on the first pass); current Master Discovery Ledger: `PUBLISHED` 446, `ARCHIVED` 2,132, `NOT_YET_PUBLISHED` 285, `DISCOVERED` 723.
+- **Batch 32**: the active batch — pushed and transferred 2026-10-18, 0/100 reviewed, 0/100 without a phone, 100/100 resend (second resend round under the new rule).
 - **Two production listings remain deliberately held hidden pending the owner's decision** (unchanged by this pass, both correctly showing `PUBLISHED` + a `known_hold` note in the ledger): the Vijayanagar "Rajanna Military Hotel" (Batch 16, `2f731614-a728-40ed-8fd8-371d6dd33ff4`) and "Lakshmi Balaji Tiffin Centre" (Batch 17, `3e117223-d191-4ad8-8050-846e1dfebbad`).
 - **A non-qualifying row can still have photos in the bucket** (confirmed for real in Batch 22 — 2 of 32 photo-bearing place_ids were `No`/blank, not `Yes`) — this is normal, not a bucket hygiene problem; the download step always lists the bucket's actual contents rather than filtering to the Yes set first, so nothing is ever missed or left to purge unarchived.
 - **`build-master-ledger.mjs --verify-batch` now also accepts `--accept-photo-gap=<place_id>,...`** (added while closing out Batch 20 above) — an explicit, per-place_id allowlist for the one case the gate hard-blocks on (an approved, unpublished, zero-local-photo row), never a blanket bypass; the acknowledgment is recorded in the batch's own `verify_notes`. Use it only after confirming (as Batch 20's closeout did) that the zero-photo state is real and not a download miss.
@@ -794,6 +806,7 @@ Small, additive UI change to the intern-facing Workbench page (`discovery.html`)
 
 ## Latest relevant commits
 
+- (this commit) — docs: close out Discovery Workbench Batch 31 (first resend-round results, times_sent carried through correctly) and record Batch 32 push+transfer in CLAUDE.md (see the dedicated sections above — 23 qualifying rows join NOT_YET_PUBLISHED; `listings` unchanged at 478/3 hidden; Batch 32 pushed and transferred, 100/100 resend)
 - (this commit) — docs: close out Discovery Workbench Batch 30 (0 qualifying — the phone-less batch) and record Batch 31 push+transfer in CLAUDE.md (see the dedicated sections above — Batch 31 is the first batch composed entirely of resend candidates, 100/100 with a phone, `number_valid`/`menu_list_under_100` correctly blanked; `listings` unchanged at 478/3 hidden)
 - `ad53f48` — feat(discovery): add phone-aware resend rule to workbench-sync.mjs (see the dedicated section above — never push a phone-less candidate again; backfill from a capped, tracked resend pool once the fresh pool is exhausted; two new isolated test suites, 20/20 pass; full repo suite 455/455 serially)
 - `389e4cb` — docs: close out Discovery Workbench Batch 29 and record Batch 30 push+transfer in CLAUDE.md
